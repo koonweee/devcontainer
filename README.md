@@ -8,6 +8,7 @@ This stack runs a Debian Trixie dev container behind a Tailscale sidecar.
 - Tools: `vim`, `tmux`, `mosh`, `zsh`
 - Minimal Node/TS deps: `git`, `curl`, `ca-certificates`, `openssh-server`, `sudo`, `ripgrep`, `less`, `procps`, `iproute2`, `xz-utils`, `unzip`
 - Node.js: major `22` (NodeSource)
+- CLIs installed at build: `codex` and `gemini`
 - Non-root `dev` user with passwordless sudo
 - SSH password auth enabled, key auth disabled
 - Persistent workspace volume mounted at `/workspace`
@@ -27,6 +28,7 @@ cp .env.example .env
 - `TS_HOSTNAME`: hostname to register on your tailnet
 - `DEV_PASSWORD`: SSH password for user `dev`
 - Optional: `DEV_USER`, `DEV_UID`, `DEV_GID`
+- Optional: `OPENAI_API_KEY`, `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) for CLI auth
 
 3. Start:
 
@@ -44,6 +46,13 @@ docker compose logs -f tailscale
 
 ```bash
 ssh dev@<TS_HOSTNAME>
+```
+
+6. Verify bundled CLIs:
+
+```bash
+codex --version
+gemini --version
 ```
 
 ## Network behavior

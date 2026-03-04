@@ -32,6 +32,8 @@ RUN apt-get update \
     xz-utils \
     unzip \
     nodejs \
+ && npm install -g @openai/codex @google/gemini-cli@latest \
+ && npm cache clean --force \
  && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --gid "${DEV_GID}" "${DEV_USER}" \
