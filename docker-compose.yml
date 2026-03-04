@@ -1,0 +1,43 @@
+services:
+  tailscale:
+    image: tailscale/tailscale:stable
+    hostname: ${TS_HOSTNAME:-devcontainer}
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY}
+      TS_HOSTNAME: ${TS_HOSTNAME:-devcontainer}
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "false"
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+      - ./docker/ts-entrypoint.sh:/ts-entrypoint.sh:ro
+    entrypoint: ["/bin/sh", "/ts-entrypoint.sh"]
+    restart: unless-stopped
+
+  devcontainer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        DEV_USER: ${DEV_USER:-dev}
+        DEV_UID: ${DEV_UID:-1000}
+        DEV_GID: ${DEV_GID:-1000}
+    environment:
+      DEV_USER: ${DEV_USER:-dev}
+      DEV_PASSWORD: ${DEV_PASSWORD}
+    network_mode: "service:tailscale"
+    depends_on:
+      - tailscale
+    volumes:
+      - workspace-data:/workspace
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+
+volumes:
+  tailscale-state:
+  workspace-data:
