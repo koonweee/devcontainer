@@ -24,6 +24,16 @@ interface BuildAppOptions {
   corsOrigin?: string;
 }
 
+function parseCorsOrigins(input: string): string[] {
+  const unique = new Set(
+    input
+      .split(',')
+      .map((origin) => origin.trim())
+      .filter(Boolean)
+  );
+  return [...unique];
+}
+
 function writeSseEvent(reply: FastifyReply, event: string, payload: unknown): void {
   reply.raw.write(`event: ${event}\n`);
   reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
@@ -84,10 +94,20 @@ export async function buildApp(options?: BuildAppOptions) {
   }
   await orchestrator.startRuntimeStatusMonitor();
   const heartbeatMs = options?.heartbeatMs ?? 15_000;
-  const corsOrigin = options?.corsOrigin ?? process.env.DEVBOX_WEB_ORIGIN ?? 'http://localhost:5173';
+  const configuredCorsOrigins = parseCorsOrigins(
+    options?.corsOrigin ?? process.env.DEVBOX_WEB_ORIGIN ?? 'http://localhost:5173,http://localhost:4173'
+  );
+  const defaultCorsOrigin = configuredCorsOrigins[0] ?? 'http://localhost:5173';
+  const resolveCorsOrigin = (request: FastifyRequest): string => {
+    const requestOrigin = typeof request.headers.origin === 'string' ? request.headers.origin : null;
+    if (requestOrigin && configuredCorsOrigins.includes(requestOrigin)) {
+      return requestOrigin;
+    }
+    return defaultCorsOrigin;
+  };
 
   app.addHook('onRequest', async (request, reply) => {
-    reply.header('Access-Control-Allow-Origin', corsOrigin);
+    reply.header('Access-Control-Allow-Origin', resolveCorsOrigin(request));
     reply.header('Vary', 'Origin');
     reply.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
     reply.header('Access-Control-Allow-Headers', 'Content-Type,Accept,Authorization');
@@ -213,7 +233,7 @@ export async function buildApp(options?: BuildAppOptions) {
       });
 
       reply.hijack();
-      reply.raw.setHeader('Access-Control-Allow-Origin', corsOrigin);
+      reply.raw.setHeader('Access-Control-Allow-Origin', resolveCorsOrigin(request));
       reply.raw.setHeader('Vary', 'Origin');
       reply.raw.setHeader('Content-Type', 'text/event-stream');
       reply.raw.setHeader('Cache-Control', 'no-cache');
@@ -298,9 +318,9 @@ export async function buildApp(options?: BuildAppOptions) {
     }
   );
 
-  app.get('/v1/events', async (_request, reply) => {
+  app.get('/v1/events', async (request, reply) => {
     reply.hijack();
-    reply.raw.setHeader('Access-Control-Allow-Origin', corsOrigin);
+    reply.raw.setHeader('Access-Control-Allow-Origin', resolveCorsOrigin(request));
     reply.raw.setHeader('Vary', 'Origin');
     reply.raw.setHeader('Content-Type', 'text/event-stream');
     reply.raw.setHeader('Cache-Control', 'no-cache');

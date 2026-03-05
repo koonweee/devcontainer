@@ -32,17 +32,14 @@ for i in 1 2 3 4 5 6 7 8 9 10; do
   sleep 0.5
 done
 
-if [ -s "${TAILSCALE_STATE_FILE}" ]; then
-  # Restart: reconnect using persisted state
-  tailscale up --hostname="${DEVBOX_TAILSCALE_HOSTNAME:-devbox}" --ssh
-elif [ -n "${DEVBOX_TAILSCALE_AUTHKEY:-}" ]; then
-  # First boot: authenticate with authkey
+if [ -n "${DEVBOX_TAILSCALE_AUTHKEY:-}" ] && ! grep -q '"_profiles"' "${TAILSCALE_STATE_FILE}" 2>/dev/null; then
+  # First login path: state has no profile yet, authenticate with authkey.
   tailscale up --authkey="${DEVBOX_TAILSCALE_AUTHKEY}" \
     --hostname="${DEVBOX_TAILSCALE_HOSTNAME:-devbox}" \
     --ssh
 else
-  echo "error: DEVBOX_TAILSCALE_AUTHKEY is required on first startup" >&2
-  exit 1
+  # Restart path: reconnect using persisted state.
+  tailscale up --hostname="${DEVBOX_TAILSCALE_HOSTNAME:-devbox}" --ssh
 fi
 
 # --- Firewall: restrict inbound to Tailnet only ---

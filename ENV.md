@@ -44,6 +44,10 @@ Canonical reference for runtime environment variables and defaults.
   - CLI API base URL.
   - Recommendation: point to your deployed API endpoint when using CLI remotely.
 
+- `DEVBOX_WEB_ORIGIN` (default: `http://localhost:5173,http://localhost:4173`)
+  - API CORS allowlist for web origins (comma-separated).
+  - Recommendation: include every browser origin that should call API directly.
+
 ## Runtime container env (injected by orchestrator into each box)
 These are set automatically by the orchestrator when Tailscale is configured. They are not user-configurable env vars.
 

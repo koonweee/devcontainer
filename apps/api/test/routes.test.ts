@@ -21,7 +21,10 @@ async function waitForTerminalJob(app: Awaited<ReturnType<typeof buildApp>>, job
 
 describe('API routes', () => {
   it('applies CORS headers and handles preflight requests', async () => {
-    const app = await buildApp({ orchestrator: buildInMemoryOrchestrator() });
+    const app = await buildApp({
+      orchestrator: buildInMemoryOrchestrator(),
+      corsOrigin: 'http://localhost:4173,http://localhost:5173'
+    });
 
     const preflight = await app.inject({
       method: 'OPTIONS',
@@ -36,8 +39,19 @@ describe('API routes', () => {
     expect(preflight.headers['access-control-allow-origin']).toBe('http://localhost:5173');
     expect(preflight.headers['access-control-allow-methods']).toContain('POST');
 
+    const preflight4173 = await app.inject({
+      method: 'OPTIONS',
+      url: '/v1/boxes',
+      headers: {
+        origin: 'http://localhost:4173',
+        'access-control-request-method': 'POST'
+      }
+    });
+    expect(preflight4173.statusCode).toBe(204);
+    expect(preflight4173.headers['access-control-allow-origin']).toBe('http://localhost:4173');
+
     const getBoxes = await app.inject({ method: 'GET', url: '/v1/boxes' });
-    expect(getBoxes.headers['access-control-allow-origin']).toBe('http://localhost:5173');
+    expect(getBoxes.headers['access-control-allow-origin']).toBe('http://localhost:4173');
     await app.close();
   });
 

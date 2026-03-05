@@ -11,5 +11,17 @@ export async function load() {
     tailnetConfig = null;
   }
 
-  return { tailnetConfig };
+  let boxCount = 0;
+  try {
+    const boxes = await client.listBoxes();
+    boxCount = boxes.length;
+  } catch {
+    boxCount = 0;
+  }
+
+  return {
+    tailnetConfig,
+    tailnetConfigured: tailnetConfig !== null,
+    boxCount
+  };
 }

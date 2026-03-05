@@ -62,7 +62,7 @@ const RUNTIME_RECONCILE_ACTIONS = new Set([
   'restart',
   'kill'
 ]);
-const DEVICE_CAPTURE_RETRY_DELAYS = [1_000, 2_000, 3_000] as const;
+const DEVICE_CAPTURE_RETRY_DELAYS = [1_000, 2_000, 3_000, 5_000, 8_000, 13_000] as const;
 
 /** Coordinates box lifecycle operations, jobs, logs, and security checks. */
 export class DevboxOrchestrator {
@@ -248,7 +248,9 @@ export class DevboxOrchestrator {
           ctx.setProgress(75, 'Waiting for Tailscale device registration');
           const device = await this.captureDeviceByHostname(tailnetConfig, tailnetHostname);
           if (!device) {
-            throw new ValidationError('Timed out waiting for Tailscale device registration.');
+            throw new ValidationError(
+              `Timed out waiting for Tailscale device registration for hostname ${tailnetHostname}.`
+            );
           }
           this.boxes.update(box.id, { tailnetDeviceId: device.id });
         }
