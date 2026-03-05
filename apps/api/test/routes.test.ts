@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { buildApp } from '../src/app.js';
-import { buildInMemoryOrchestrator } from './support/orchestrator.js';
+import { buildInMemoryHarness, buildInMemoryOrchestrator } from './support/orchestrator.js';
 
 async function waitForTerminalJob(app: Awaited<ReturnType<typeof buildApp>>, jobId: string): Promise<void> {
   const deadline = Date.now() + 2000;
@@ -119,6 +119,81 @@ describe('API routes', () => {
 
     await createPromise;
     reader.cancel().catch(() => undefined);
+    await app.close();
+  });
+
+  it('returns 404 for missing box log streams before hijacking SSE', async () => {
+    const app = await buildApp({ orchestrator: buildInMemoryOrchestrator() });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/boxes/missing-box/logs'
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.headers['content-type']).toContain('application/json');
+    expect((response.json() as { message: string }).message).toContain('Box not found');
+    await app.close();
+  });
+
+  it('returns 400 when requesting logs before a container exists', async () => {
+    const harness = buildInMemoryHarness();
+    harness.runtime.failOn.createContainer = new Error('create container failed');
+    const app = await buildApp({ orchestrator: harness.orchestrator });
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/v1/boxes',
+      payload: {
+        name: 'no-container-box',
+        image: 'debian:trixie-slim'
+      }
+    });
+    const created = createRes.json() as { box: { id: string }; job: { id: string } };
+    await waitForTerminalJob(app, created.job.id);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/v1/boxes/${created.box.id}/logs`
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect((response.json() as { message: string }).message).toContain('no container logs yet');
+    await app.close();
+  });
+
+  it('returns 403 when requesting logs from unmanaged containers', async () => {
+    const harness = buildInMemoryHarness();
+    const app = await buildApp({ orchestrator: harness.orchestrator });
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/v1/boxes',
+      payload: {
+        name: 'unmanaged-logs-box',
+        image: 'debian:trixie-slim'
+      }
+    });
+    const created = createRes.json() as { box: { id: string }; job: { id: string } };
+    await waitForTerminalJob(app, created.job.id);
+
+    const box = await harness.orchestrator.getBox(created.box.id);
+    if (!box?.containerId) {
+      throw new Error('Expected container id for unmanaged logs test');
+    }
+    const container = harness.runtime.containers.get(box.containerId);
+    if (!container) {
+      throw new Error('Expected container record for unmanaged logs test');
+    }
+    container.labels = {};
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/v1/boxes/${created.box.id}/logs`
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect((response.json() as { message: string }).message).toContain('unmanaged container');
     await app.close();
   });
 });

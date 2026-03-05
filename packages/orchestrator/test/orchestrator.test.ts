@@ -105,5 +105,37 @@ describe('DevboxOrchestrator', () => {
 
     const stopJob = await orchestrator.stopBox(created.box.id);
     expect(await waitForJob(orchestrator, stopJob.id)).toBe('failed');
+    const errored = await orchestrator.getBox(created.box.id);
+    expect(errored?.status).toBe('error');
+  });
+
+  it('marks box status as error when lifecycle jobs fail', async () => {
+    const { runtime, orchestrator } = buildHarness();
+
+    runtime.failOn.createNetwork = new Error('network create failed');
+    const failedCreate = await orchestrator.createBox({
+      name: 'box-delta',
+      image: 'debian:trixie-slim'
+    });
+    expect(await waitForJob(orchestrator, failedCreate.job.id)).toBe('failed');
+    expect((await orchestrator.getBox(failedCreate.box.id))?.status).toBe('error');
+
+    delete runtime.failOn.createNetwork;
+    const created = await orchestrator.createBox({
+      name: 'box-echo',
+      image: 'debian:trixie-slim'
+    });
+    expect(await waitForJob(orchestrator, created.job.id)).toBe('succeeded');
+
+    runtime.failOn.stopContainer = new Error('stop failed');
+    const stopJob = await orchestrator.stopBox(created.box.id);
+    expect(await waitForJob(orchestrator, stopJob.id)).toBe('failed');
+    expect((await orchestrator.getBox(created.box.id))?.status).toBe('error');
+
+    delete runtime.failOn.stopContainer;
+    runtime.failOn.removeVolume = new Error('remove volume failed');
+    const removeJob = await orchestrator.removeBox(created.box.id);
+    expect(await waitForJob(orchestrator, removeJob.id)).toBe('failed');
+    expect((await orchestrator.getBox(created.box.id))?.status).toBe('error');
   });
 });

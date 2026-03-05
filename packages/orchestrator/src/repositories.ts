@@ -74,35 +74,114 @@ function mapJob(row: Record<string, unknown>): Job {
   };
 }
 
-export function initializeSchema(db: DatabaseSync): void {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS boxes (
-      id TEXT PRIMARY KEY,
-      name TEXT UNIQUE NOT NULL,
-      image TEXT NOT NULL,
-      status TEXT NOT NULL,
-      container_id TEXT,
-      network_name TEXT NOT NULL,
-      volume_name TEXT NOT NULL,
-      tailnet_url TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      deleted_at TEXT
-    );
+const BOXES_COLUMNS_SQL = `
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  image TEXT NOT NULL,
+  status TEXT NOT NULL,
+  container_id TEXT,
+  network_name TEXT NOT NULL,
+  volume_name TEXT NOT NULL,
+  tailnet_url TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT
+`;
 
-    CREATE TABLE IF NOT EXISTS jobs (
-      id TEXT PRIMARY KEY,
-      type TEXT NOT NULL,
-      status TEXT NOT NULL,
-      box_id TEXT,
-      progress INTEGER NOT NULL,
-      message TEXT NOT NULL,
-      error TEXT,
-      created_at TEXT NOT NULL,
-      started_at TEXT,
-      finished_at TEXT
-    );
-  `);
+const CREATE_BOXES_TABLE_SQL = `
+  CREATE TABLE IF NOT EXISTS boxes (
+    ${BOXES_COLUMNS_SQL}
+  );
+`;
+
+const CREATE_BOXES_TABLE_MIGRATION_SQL = `
+  CREATE TABLE boxes (
+    ${BOXES_COLUMNS_SQL}
+  );
+`;
+
+const CREATE_JOBS_TABLE_SQL = `
+  CREATE TABLE IF NOT EXISTS jobs (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL,
+    status TEXT NOT NULL,
+    box_id TEXT,
+    progress INTEGER NOT NULL,
+    message TEXT NOT NULL,
+    error TEXT,
+    created_at TEXT NOT NULL,
+    started_at TEXT,
+    finished_at TEXT
+  );
+`;
+
+const CREATE_ACTIVE_NAME_UNIQUE_INDEX_SQL = `
+  CREATE UNIQUE INDEX IF NOT EXISTS boxes_name_active_unique
+  ON boxes(name)
+  WHERE deleted_at IS NULL;
+`;
+
+function hasLegacyBoxNameUniqueConstraint(db: DatabaseSync): boolean {
+  const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'boxes'").get() as
+    | { sql?: unknown }
+    | undefined;
+  if (!row || typeof row.sql !== 'string') {
+    return false;
+  }
+
+  return /name\s+TEXT\s+UNIQUE/i.test(row.sql);
+}
+
+function migrateLegacyBoxesTable(db: DatabaseSync): void {
+  db.exec('BEGIN');
+  try {
+    db.exec('ALTER TABLE boxes RENAME TO boxes_legacy');
+    db.exec(CREATE_BOXES_TABLE_MIGRATION_SQL);
+    db.exec(`
+      INSERT INTO boxes (
+        id,
+        name,
+        image,
+        status,
+        container_id,
+        network_name,
+        volume_name,
+        tailnet_url,
+        created_at,
+        updated_at,
+        deleted_at
+      )
+      SELECT
+        id,
+        name,
+        image,
+        status,
+        container_id,
+        network_name,
+        volume_name,
+        tailnet_url,
+        created_at,
+        updated_at,
+        deleted_at
+      FROM boxes_legacy
+    `);
+    db.exec('DROP TABLE boxes_legacy');
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+export function initializeSchema(db: DatabaseSync): void {
+  db.exec(CREATE_JOBS_TABLE_SQL);
+
+  if (hasLegacyBoxNameUniqueConstraint(db)) {
+    migrateLegacyBoxesTable(db);
+  }
+
+  db.exec(CREATE_BOXES_TABLE_SQL);
+  db.exec(CREATE_ACTIVE_NAME_UNIQUE_INDEX_SQL);
 }
 
 /** Persists box records in SQLite with minimal query logic. */

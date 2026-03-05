@@ -151,15 +151,17 @@ export async function buildApp(options?: BuildAppOptions) {
       }
     },
     async (request, reply) => {
+      const logs = await orchestrator.streamBoxLogs(request.params.boxId, {
+        follow: request.query.follow,
+        since: request.query.since
+      });
+
       reply.hijack();
       reply.raw.setHeader('Content-Type', 'text/event-stream');
       reply.raw.setHeader('Cache-Control', 'no-cache');
       reply.raw.setHeader('Connection', 'keep-alive');
 
-      for await (const log of orchestrator.streamBoxLogs(request.params.boxId, {
-        follow: request.query.follow,
-        since: request.query.since
-      })) {
+      for await (const log of logs) {
         writeSseEvent(reply, 'box.logs', log);
       }
 
