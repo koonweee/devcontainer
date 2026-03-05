@@ -48,8 +48,6 @@
     </div>
   </nav>
 
-  {#key $page.url.pathname}
-    <slot />
-  {/key}
+  <slot />
 </div>
 </Tooltip.Provider>

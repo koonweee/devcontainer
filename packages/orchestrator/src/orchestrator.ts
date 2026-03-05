@@ -444,8 +444,10 @@ export class DevboxOrchestrator {
       return;
     }
 
+    let cleanupPath = 'none';
     try {
       if (box.tailnetNodeId) {
+        cleanupPath = `nodeId:${box.tailnetNodeId}`;
         const devices = await this.tailscaleClient.listDevices(tailnetConfig);
         const device = devices.find((d) => d.nodeId === box.tailnetNodeId);
         if (device) {
@@ -454,14 +456,19 @@ export class DevboxOrchestrator {
       } else if (box.tailnetUrl) {
         // Hostname fallback: extract hostname from tailnetUrl (ssh://hostname)
         const hostname = box.tailnetUrl.replace('ssh://', '');
+        cleanupPath = `hostname:${hostname}`;
         const devices = await this.tailscaleClient.listDevices(tailnetConfig);
         const device = devices.find((d) => d.hostname === hostname);
         if (device) {
           await this.tailscaleClient.deleteDevice(tailnetConfig, device.id);
         }
       }
-    } catch {
-      // Tailnet cleanup failure is a warning, not a fatal error
+    } catch (error) {
+      // Tailnet cleanup failure is a warning, not a fatal error.
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(
+        `[orchestrator] tailnet cleanup failed for box ${box.id} (${cleanupPath}): ${message}`
+      );
     }
   }
 

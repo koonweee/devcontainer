@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { OrchestratorEvents } from '../src/events.js';
 import { JobRunner } from '../src/job-runner.js';
@@ -714,6 +714,27 @@ describe('DevboxOrchestrator - Tailscale integration', () => {
     ).rejects.toBeInstanceOf(ConfigLockedError);
   });
 
+  it('mints Tailscale auth key only on create, not on box restart', async () => {
+    const { runtime, orchestrator, tailnetConfig, tailscaleClient } = buildTailnetHarness();
+    tailnetConfig.set(SAMPLE_TAILNET_INPUT);
+    runtime.defaultExecResult = {
+      exitCode: 0,
+      stdout: JSON.stringify({ Self: { ID: 'node-restart' } }),
+      stderr: ''
+    };
+
+    const { box, job } = await orchestrator.createBox({ name: 'mint-once-box' });
+    expect(await waitForJob(orchestrator, job.id)).toBe('succeeded');
+    expect(tailscaleClient.calls.filter((c) => c.method === 'mintAuthKey')).toHaveLength(1);
+
+    const stopJob = await orchestrator.stopBox(box.id);
+    expect(await waitForJob(orchestrator, stopJob.id)).toBe('succeeded');
+
+    const startJob = await orchestrator.startBox(box.id);
+    expect(await waitForJob(orchestrator, startJob.id)).toBe('succeeded');
+    expect(tailscaleClient.calls.filter((c) => c.method === 'mintAuthKey')).toHaveLength(1);
+  });
+
   it('getTailnetConfig redacts the OAuth secret', async () => {
     const { orchestrator, tailnetConfig } = buildTailnetHarness();
     tailnetConfig.set(SAMPLE_TAILNET_INPUT);
@@ -748,6 +769,33 @@ describe('DevboxOrchestrator - Tailscale integration', () => {
     const deleteCall = tailscaleClient.calls.find((c) => c.method === 'deleteDevice');
     expect(deleteCall).toBeTruthy();
     expect(deleteCall!.args[1]).toBe('device-1');
+  });
+
+  it('removeBox warns and still succeeds when Tailnet cleanup fails', async () => {
+    const { runtime, orchestrator, tailnetConfig, tailscaleClient } = buildTailnetHarness();
+    tailnetConfig.set(SAMPLE_TAILNET_INPUT);
+
+    runtime.defaultExecResult = {
+      exitCode: 0,
+      stdout: JSON.stringify({ Self: { ID: 'node-warning' } }),
+      stderr: ''
+    };
+    tailscaleClient.failOn.listDevices = new Error('tailscale list failed');
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const { box, job } = await orchestrator.createBox({ name: 'cleanup-warning-test' });
+      await waitForJob(orchestrator, job.id);
+
+      const removeJob = await orchestrator.removeBox(box.id);
+      expect(await waitForJob(orchestrator, removeJob.id)).toBe('succeeded');
+      expect(await orchestrator.getBox(box.id)).toBeNull();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining(`tailnet cleanup failed for box ${box.id} (nodeId:node-warning)`)
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it('missing container enqueues cleanup job when tailnet is configured', async () => {

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { TailnetConfig } from '@devbox/api-client';
+  import { createApiClient, type TailnetConfig } from '@devbox/api-client';
   import { invalidateAll } from '$app/navigation';
   import { cn } from '$lib/utils';
 
@@ -19,17 +19,20 @@
   let saving = false;
   let error = '';
   let success = '';
+  let currentTailnetConfig = data.tailnetConfig;
+  let isTailnetConfigured = data.tailnetConfigured;
 
   // Form fields
   let formTailnet = '';
   let formClientId = '';
   let formClientSecret = '';
+  const client = createApiClient({ baseUrl: data.apiUrl });
 
-  $: locked = data.hasBoxes && data.tailnetConfigured;
+  $: locked = data.hasBoxes && isTailnetConfigured;
 
   function startEdit() {
-    formTailnet = data.tailnetConfig?.tailnet ?? '';
-    formClientId = data.tailnetConfig?.oauthClientId ?? '';
+    formTailnet = currentTailnetConfig?.tailnet ?? '';
+    formClientId = currentTailnetConfig?.oauthClientId ?? '';
     formClientSecret = '';
     editing = true;
     error = '';
@@ -47,22 +50,13 @@
     error = '';
     success = '';
     try {
-      const response = await fetch(`${data.apiUrl}/v1/tailnet/config`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tailnet: formTailnet,
-          oauthClientId: formClientId,
-          oauthClientSecret: formClientSecret
-        })
+      const config = await client.setTailnetConfig({
+        tailnet: formTailnet,
+        oauthClientId: formClientId,
+        oauthClientSecret: formClientSecret
       });
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({})) as { message?: string };
-        throw new Error(body.message ?? `Failed (${response.status})`);
-      }
-      const config = (await response.json()) as TailnetConfig;
-      data.tailnetConfig = config;
-      data.tailnetConfigured = true;
+      currentTailnetConfig = config;
+      isTailnetConfigured = true;
       editing = false;
       success = 'Configuration saved';
       await invalidateAll();
@@ -78,15 +72,9 @@
     error = '';
     success = '';
     try {
-      const response = await fetch(`${data.apiUrl}/v1/tailnet/config`, {
-        method: 'DELETE'
-      });
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({})) as { message?: string };
-        throw new Error(body.message ?? `Failed (${response.status})`);
-      }
-      data.tailnetConfig = null;
-      data.tailnetConfigured = false;
+      await client.deleteTailnetConfig();
+      currentTailnetConfig = null;
+      isTailnetConfigured = false;
       editing = false;
       success = 'Configuration cleared';
       await invalidateAll();
@@ -145,7 +133,7 @@
         </div>
       {/if}
 
-      {#if !data.tailnetConfig && !editing}
+      {#if !currentTailnetConfig && !editing}
         <!-- No config: show form directly -->
         <form onsubmit={saveConfig} class="space-y-3">
           <div class="grid gap-3 sm:grid-cols-3">
@@ -176,22 +164,22 @@
             </Button>
           </div>
         </form>
-      {:else if data.tailnetConfig}
+      {:else if currentTailnetConfig}
         <!-- Read-only display -->
         <div class="space-y-3">
           <div class="rounded-md border border-border bg-muted/30 px-3 py-2.5">
             <div class="grid gap-2 sm:grid-cols-3">
               <div>
                 <span class="text-xs text-muted-foreground">Tailnet</span>
-                <p class="font-mono text-sm text-foreground">{data.tailnetConfig.tailnet}</p>
+                <p class="font-mono text-sm text-foreground">{currentTailnetConfig.tailnet}</p>
               </div>
               <div>
                 <span class="text-xs text-muted-foreground">OAuth Client ID</span>
-                <p class="font-mono text-sm text-foreground">{data.tailnetConfig.oauthClientId}</p>
+                <p class="font-mono text-sm text-foreground">{currentTailnetConfig.oauthClientId}</p>
               </div>
               <div>
                 <span class="text-xs text-muted-foreground">OAuth Client Secret</span>
-                <p class="font-mono text-sm text-foreground">{maskSecret(data.tailnetConfig.oauthClientSecret)}</p>
+                <p class="font-mono text-sm text-foreground">{maskSecret(currentTailnetConfig.oauthClientSecret)}</p>
               </div>
             </div>
           </div>

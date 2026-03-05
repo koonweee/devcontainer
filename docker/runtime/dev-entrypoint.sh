@@ -19,9 +19,10 @@ mkdir -p /var/run/sshd
 
 # --- Tailscale setup ---
 DEVBOX_TAILSCALE_STATE_DIR="${DEVBOX_TAILSCALE_STATE_DIR:-/var/lib/tailscale}"
+TAILSCALE_STATE_FILE="${DEVBOX_TAILSCALE_STATE_DIR}/tailscaled.state"
 mkdir -p "${DEVBOX_TAILSCALE_STATE_DIR}"
 
-tailscaled --state="${DEVBOX_TAILSCALE_STATE_DIR}/tailscaled.state" \
+tailscaled --state="${TAILSCALE_STATE_FILE}" \
   --socket=/var/run/tailscale/tailscaled.sock &
 TAILSCALED_PID=$!
 
@@ -31,13 +32,16 @@ for i in 1 2 3 4 5 6 7 8 9 10; do
   sleep 0.5
 done
 
-if [ -n "${DEVBOX_TAILSCALE_AUTHKEY:-}" ]; then
+if [ -s "${TAILSCALE_STATE_FILE}" ]; then
+  # Restart: reconnect using persisted state
+  tailscale up --ssh
+elif [ -n "${DEVBOX_TAILSCALE_AUTHKEY:-}" ]; then
   # First boot: authenticate with authkey
   tailscale up --authkey="${DEVBOX_TAILSCALE_AUTHKEY}" \
     --hostname="${DEVBOX_TAILSCALE_HOSTNAME:-devbox}" \
     --ssh
 else
-  # Restart: reconnect using persisted state
+  # Fallback path when no authkey is provided
   tailscale up --ssh
 fi
 
@@ -48,9 +52,8 @@ iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 iptables -A INPUT -i tailscale0 -j ACCEPT
 iptables -A INPUT -j DROP
 
-# Best-effort logout on shutdown
+# Best-effort tailscaled shutdown
 cleanup() {
-  tailscale logout 2>/dev/null || true
   kill "$TAILSCALED_PID" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
