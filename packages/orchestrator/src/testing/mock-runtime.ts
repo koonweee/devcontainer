@@ -19,6 +19,7 @@ export class MockDockerRuntime implements DockerRuntime {
   readonly networks = new Set<string>();
   readonly volumes = new Set<string>();
   readonly containers = new Map<string, FakeContainer>();
+  lastCreateContainerOptions: CreateContainerOptions | null = null;
   failOn: Partial<Record<keyof DockerRuntime, Error>> = {};
 
   private containerCounter = 0;
@@ -35,6 +36,7 @@ export class MockDockerRuntime implements DockerRuntime {
 
   async createContainer(options: CreateContainerOptions): Promise<string> {
     this.throwIfConfigured('createContainer');
+    this.lastCreateContainerOptions = options;
     this.containerCounter += 1;
     const id = `mock-${this.containerCounter}`;
     this.containers.set(id, {

@@ -33,8 +33,8 @@ export function createDevboxStore(initialBoxes: Box[], apiBaseUrl?: string) {
     }
   }
 
-  async function create(name: string, image: string): Promise<void> {
-    await client.createBox({ name, image });
+  async function create(name: string): Promise<void> {
+    await client.createBox({ name });
     await refresh();
   }
 

@@ -48,8 +48,7 @@ describe('API routes', () => {
       method: 'POST',
       url: '/v1/boxes',
       payload: {
-        name: 'api-test-box',
-        image: 'debian:trixie-slim'
+        name: 'api-test-box'
       }
     });
 
@@ -85,8 +84,7 @@ describe('API routes', () => {
       method: 'POST',
       url: '/v1/boxes',
       payload: {
-        name: 'reconcile-api-box',
-        image: 'debian:trixie-slim'
+        name: 'reconcile-api-box'
       }
     });
     expect(createRes.statusCode).toBe(200);
@@ -119,12 +117,22 @@ describe('API routes', () => {
       method: 'POST',
       url: '/v1/boxes',
       payload: {
-        name: 'Invalid Name',
-        image: 'debian:trixie-slim'
+        name: 'Invalid Name'
       }
     });
 
     expect(response.statusCode).toBe(400);
+
+    const legacyPayload = await app.inject({
+      method: 'POST',
+      url: '/v1/boxes',
+      payload: {
+        name: 'legacy-image-field',
+        image: 'debian:trixie-slim'
+      }
+    });
+
+    expect(legacyPayload.statusCode).toBe(400);
     await app.close();
   });
 
@@ -145,7 +153,7 @@ describe('API routes', () => {
       headers: {
         'content-type': 'application/json'
       },
-      body: JSON.stringify({ name: 'sse-box', image: 'debian:trixie-slim' })
+      body: JSON.stringify({ name: 'sse-box' })
     });
 
     let payload = '';
@@ -201,8 +209,7 @@ describe('API routes', () => {
       method: 'POST',
       url: '/v1/boxes',
       payload: {
-        name: 'no-container-box',
-        image: 'debian:trixie-slim'
+        name: 'no-container-box'
       }
     });
     const created = createRes.json() as { box: { id: string }; job: { id: string } };
@@ -226,8 +233,7 @@ describe('API routes', () => {
       method: 'POST',
       url: '/v1/boxes',
       payload: {
-        name: 'unmanaged-logs-box',
-        image: 'debian:trixie-slim'
+        name: 'unmanaged-logs-box'
       }
     });
     const created = createRes.json() as { box: { id: string }; job: { id: string } };

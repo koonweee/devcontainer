@@ -9,7 +9,6 @@ export type Job = paths['/v1/jobs']['get']['responses'][200]['content']['applica
 
 export interface CreateBoxInput {
   name: string;
-  image: string;
   command?: string[];
   env?: Record<string, string>;
 }

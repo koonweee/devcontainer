@@ -56,7 +56,9 @@ export class DevboxOrchestrator {
     private readonly boxes: BoxRepository,
     private readonly jobs: JobRepository,
     private readonly jobRunner: JobRunner,
-    readonly events: OrchestratorEvents
+    readonly events: OrchestratorEvents,
+    private readonly runtimeImage = 'devbox-runtime:local',
+    private readonly runtimeEnv: Record<string, string> = {}
   ) {}
 
   async createBox(input: CreateBoxInput): Promise<CreateBoxResult> {
@@ -73,7 +75,7 @@ export class DevboxOrchestrator {
       box = this.boxes.create({
         id,
         name: input.name,
-        image: input.image,
+        image: this.runtimeImage,
         status: 'creating',
         networkName: networkName(id),
         volumeName: volumeName(id)
@@ -110,7 +112,8 @@ export class DevboxOrchestrator {
           networkName: box.networkName,
           volumeName: box.volumeName,
           labels: managedLabels(box.id),
-          env: input.env,
+          // Configured runtime env wins over request env to keep server-side policy authoritative.
+          env: { ...(input.env ?? {}), ...this.runtimeEnv },
           command: input.command
         });
 

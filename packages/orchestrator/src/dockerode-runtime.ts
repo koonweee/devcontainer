@@ -69,7 +69,7 @@ export class DockerodeRuntime implements DockerRuntime {
   }
 
   async createContainer(options: CreateContainerOptions): Promise<string> {
-    await this.ensureImage(options.image);
+    await this.ensureImageInstalled(options.image);
 
     const container = await this.docker.createContainer({
       name: options.name,
@@ -91,7 +91,7 @@ export class DockerodeRuntime implements DockerRuntime {
     return container.id;
   }
 
-  private async ensureImage(image: string): Promise<void> {
+  private async ensureImageInstalled(image: string): Promise<void> {
     try {
       await this.docker.getImage(image).inspect();
       return;
@@ -101,17 +101,9 @@ export class DockerodeRuntime implements DockerRuntime {
         throw error;
       }
     }
-
-    const pullStream = await this.docker.pull(image);
-    await new Promise<void>((resolve, reject) => {
-      this.docker.modem.followProgress(pullStream, (error) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-        resolve();
-      });
-    });
+    throw new Error(
+      `Runtime image not found locally: ${image}. Build/tag it first (try: npm run build:runtime-image).`
+    );
   }
 
   async startContainer(containerId: string): Promise<void> {

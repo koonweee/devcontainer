@@ -45,8 +45,7 @@ async function runReuseCheck(): Promise<void> {
 
   try {
     const first = await orchestrator.createBox({
-      name: 'sqlite-reuse',
-      image: 'debian:trixie-slim'
+      name: 'sqlite-reuse'
     });
     if ((await waitForJob(orchestrator, first.job.id)) !== 'succeeded') {
       throw new Error('first create job did not succeed');
@@ -58,8 +57,7 @@ async function runReuseCheck(): Promise<void> {
     }
 
     const second = await orchestrator.createBox({
-      name: 'sqlite-reuse',
-      image: 'debian:trixie-slim'
+      name: 'sqlite-reuse'
     });
     if ((await waitForJob(orchestrator, second.job.id)) !== 'succeeded') {
       throw new Error('second create job did not succeed');

@@ -29,6 +29,14 @@ function writeSseEvent(reply: FastifyReply, event: string, payload: unknown): vo
 
 function attachErrorMapping(app: FastifyInstance): void {
   app.setErrorHandler((error: FastifyError, _request: FastifyRequest, reply: FastifyReply) => {
+    const hasSchemaValidation =
+      'validation' in error &&
+      Array.isArray((error as FastifyError & { validation?: unknown[] }).validation);
+    if (hasSchemaValidation || error.statusCode === 400) {
+      reply.status(400).send({ message: error.message });
+      return;
+    }
+
     if (error instanceof ValidationError) {
       reply.status(400).send({ message: error.message });
       return;
@@ -49,7 +57,14 @@ function attachErrorMapping(app: FastifyInstance): void {
 }
 
 export async function buildApp(options?: BuildAppOptions) {
-  const app = Fastify({ logger: false }).withTypeProvider<TypeBoxTypeProvider>();
+  const app = Fastify({
+    logger: false,
+    ajv: {
+      customOptions: {
+        removeAdditional: false
+      }
+    }
+  }).withTypeProvider<TypeBoxTypeProvider>();
   let orchestrator = options?.orchestrator;
   if (!orchestrator) {
     const { createOrchestrator } = await import('@devbox/orchestrator/factory');

@@ -5,9 +5,12 @@ services:
       dockerfile: apps/api/Dockerfile
     environment:
       DEVBOX_DB_PATH: /data/devbox.sqlite
+      DEVBOX_RUNTIME_IMAGE: devbox-runtime:local
+      DEVBOX_RUNTIME_ENV_FILE: /runtime/runtime.env
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - devbox-data:/data
+      - ./docker/runtime/runtime.env:/runtime/runtime.env:ro
     ports:
       - "3000:3000"
     restart: unless-stopped

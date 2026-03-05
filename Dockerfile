@@ -43,8 +43,8 @@ RUN groupadd --gid "${DEV_GID}" "${DEV_USER}" \
  && echo "${DEV_USER} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/90-dev-user \
  && chmod 0440 /etc/sudoers.d/90-dev-user
 
-COPY docker/sshd_config /etc/ssh/sshd_config
-COPY docker/dev-entrypoint.sh /usr/local/bin/dev-entrypoint.sh
+COPY docker/runtime/sshd_config /etc/ssh/sshd_config
+COPY docker/runtime/dev-entrypoint.sh /usr/local/bin/dev-entrypoint.sh
 RUN chmod +x /usr/local/bin/dev-entrypoint.sh
 
 WORKDIR /workspace
