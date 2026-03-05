@@ -4,8 +4,6 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
     environment:
-      API_HOST: 0.0.0.0
-      API_PORT: 3000
       DEVBOX_DB_PATH: /data/devbox.sqlite
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

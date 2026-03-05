@@ -26,3 +26,4 @@ flowchart LR
 - API container is privileged and mounts `docker.sock`.
 - Web container is separate and has no Docker socket access.
 - Compose wiring is in [`docker-compose.yml`].
+- Environment variable defaults and recommendations are documented in [`ENV.md`].
