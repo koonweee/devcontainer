@@ -8,3 +8,6 @@ dist
 build
 .svelte-kit
 .playwright-mcp
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
