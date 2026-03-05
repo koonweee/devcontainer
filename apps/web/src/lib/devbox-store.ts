@@ -646,9 +646,14 @@ export function createDevboxStore(initialBoxes: Box[], apiBaseUrl?: string, clie
   }
 
   function clearLogs(boxId: string): void {
+    const viewer = currentState.logViewers[boxId];
+    if (!viewer) {
+      return;
+    }
+
     setViewerState(boxId, {
       lines: [],
-      status: 'idle',
+      status: viewer.follow ? 'streaming' : 'idle',
       error: null
     });
   }

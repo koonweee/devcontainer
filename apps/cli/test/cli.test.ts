@@ -113,5 +113,11 @@ describe('CLI logs command', () => {
     expect(() => parsePositiveIntegerOption('--tail', '0')).toThrow(
       '--tail must be a positive integer'
     );
+    expect(() => parsePositiveIntegerOption('--tail', '10abc')).toThrow(
+      '--tail must be a positive integer'
+    );
+    expect(() => parsePositiveIntegerOption('--tail', '1e2')).toThrow(
+      '--tail must be a positive integer'
+    );
   });
 });

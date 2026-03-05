@@ -468,7 +468,10 @@ describe('createDevboxStore', () => {
       async streamEvents() {
         return emptyEvents();
       },
-      async streamBoxLogs(_boxId: string, options?: { follow?: boolean; signal?: AbortSignal }) {
+      async streamBoxLogs(
+        _boxId: string,
+        options?: { follow?: boolean; since?: string; signal?: AbortSignal }
+      ) {
         async function* logs(): AsyncIterable<BoxLogsEvent> {
           if (!options?.follow) {
             yield {
@@ -536,6 +539,203 @@ describe('createDevboxStore', () => {
     await waitForCondition(() => followAborted);
 
     expect(latest.openLogTabs).toHaveLength(0);
+    unsubscribe();
+  });
+
+  it('clears logs without stopping follow mode', async () => {
+    const box = makeBox();
+
+    const store = createDevboxStore([box], undefined, {
+      async createBox() {
+        return { box };
+      },
+      async listBoxes() {
+        return [box];
+      },
+      async startBox() {
+        return {};
+      },
+      async stopBox() {
+        return {};
+      },
+      async removeBox() {
+        return {};
+      },
+      async streamEvents() {
+        return emptyEvents();
+      },
+      async streamBoxLogs(
+        _boxId: string,
+        options?: { follow?: boolean; since?: string; signal?: AbortSignal }
+      ) {
+        async function* logs(): AsyncIterable<BoxLogsEvent> {
+          if (!options?.follow) {
+            yield {
+              event: 'box.logs',
+              data: {
+                boxId: box.id,
+                stream: 'stdout',
+                line: 'snapshot',
+                timestamp: new Date('2026-01-01T00:00:00.000Z').toISOString()
+              }
+            };
+            return;
+          }
+
+          yield {
+            event: 'box.logs',
+            data: {
+              boxId: box.id,
+              stream: 'stdout',
+              line: 'follow-line',
+              timestamp: new Date('2026-01-01T00:00:01.000Z').toISOString()
+            }
+          };
+
+          await new Promise<void>((resolve) => {
+            if (!options?.signal || options.signal.aborted) {
+              resolve();
+              return;
+            }
+            options.signal.addEventListener('abort', () => resolve(), { once: true });
+          });
+        }
+
+        return logs();
+      }
+    });
+
+    let latest = {
+      boxes: [box],
+      error: null,
+      loading: false,
+      openLogTabs: [] as string[],
+      activeLogTab: null as string | null,
+      logViewers: {} as Record<
+        string,
+        {
+          follow: boolean;
+          status: string;
+          lines: Array<{ line: string }>;
+        }
+      >
+    };
+    const unsubscribe = store.subscribe((value) => {
+      latest = value;
+    });
+
+    await store.openLogs(box.id);
+    store.setLogFollow(box.id, true);
+    await waitForCondition(
+      () => latest.logViewers[box.id]?.status === 'streaming'
+    );
+
+    store.clearLogs(box.id);
+
+    expect(latest.logViewers[box.id]?.follow).toBe(true);
+    expect(latest.logViewers[box.id]?.status).toBe('streaming');
+    expect(latest.logViewers[box.id]?.lines).toEqual([]);
+
+    store.closeLogs(box.id);
+    unsubscribe();
+  });
+
+  it('does not re-append replayed cursor line after follow reconnect', async () => {
+    const box = makeBox();
+    const firstTimestamp = '2026-01-01T00:00:01.000000000Z';
+    const secondTimestamp = '2026-01-01T00:00:01.000000001Z';
+
+    let followCalls = 0;
+    const store = createDevboxStore([box], undefined, {
+      async createBox() {
+        return { box };
+      },
+      async listBoxes() {
+        return [box];
+      },
+      async startBox() {
+        return {};
+      },
+      async stopBox() {
+        return {};
+      },
+      async removeBox() {
+        return {};
+      },
+      async streamEvents() {
+        return emptyEvents();
+      },
+      async streamBoxLogs(
+        _boxId: string,
+        options?: { follow?: boolean; since?: string; signal?: AbortSignal }
+      ) {
+        async function* logs(): AsyncIterable<BoxLogsEvent> {
+          if (!options?.follow) {
+            return;
+          }
+
+          followCalls += 1;
+          if (followCalls === 1) {
+            yield {
+              event: 'box.logs',
+              data: {
+                boxId: box.id,
+                stream: 'stdout',
+                line: 'line-1',
+                timestamp: firstTimestamp
+              }
+            };
+            return;
+          }
+
+          if (options.since === firstTimestamp) {
+            yield {
+              event: 'box.logs',
+              data: {
+                boxId: box.id,
+                stream: 'stdout',
+                line: 'line-2',
+                timestamp: secondTimestamp
+              }
+            };
+          }
+
+          await new Promise<void>((resolve) => {
+            if (!options?.signal || options.signal.aborted) {
+              resolve();
+              return;
+            }
+            options.signal.addEventListener('abort', () => resolve(), { once: true });
+          });
+        }
+
+        return logs();
+      }
+    });
+
+    let latest = {
+      boxes: [box],
+      error: null,
+      loading: false,
+      openLogTabs: [] as string[],
+      activeLogTab: null as string | null,
+      logViewers: {} as Record<string, { lines: Array<{ timestamp: string; line: string }> }>
+    };
+    const unsubscribe = store.subscribe((value) => {
+      latest = value;
+    });
+
+    await store.openLogs(box.id);
+    store.setLogFollow(box.id, true);
+    await waitForCondition(() => (latest.logViewers[box.id]?.lines ?? []).length >= 2, 4_000);
+
+    expect(followCalls).toBeGreaterThanOrEqual(2);
+    expect(latest.logViewers[box.id]?.lines).toEqual([
+      { boxId: box.id, timestamp: firstTimestamp, stream: 'stdout', line: 'line-1' },
+      { boxId: box.id, timestamp: secondTimestamp, stream: 'stdout', line: 'line-2' }
+    ]);
+
+    store.closeLogs(box.id);
     unsubscribe();
   });
 });

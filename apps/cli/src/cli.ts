@@ -15,10 +15,10 @@ export interface CliApiClient {
 }
 
 export function parsePositiveIntegerOption(name: string, value: string): number {
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed) || parsed < 1) {
+  if (!/^[1-9][0-9]*$/.test(value)) {
     throw new Error(`${name} must be a positive integer`);
   }
+  const parsed = Number(value);
   return parsed;
 }
 

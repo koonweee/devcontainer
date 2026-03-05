@@ -42,6 +42,57 @@ function parseTail(input: number | undefined): number | undefined {
   return Math.max(1, Math.floor(input));
 }
 
+const NANOSECONDS_PER_SECOND = 1_000_000_000n;
+const NANOSECONDS_PER_MILLISECOND = 1_000_000n;
+
+function parseSecondsToEpochNanos(input: string): bigint | undefined {
+  const match = input.match(/^([0-9]+)(?:\.([0-9]+))?$/);
+  if (!match) {
+    return undefined;
+  }
+
+  const seconds = BigInt(match[1]);
+  const fraction = (match[2] ?? '').slice(0, 9).padEnd(9, '0');
+
+  return seconds * NANOSECONDS_PER_SECOND + BigInt(fraction || '0');
+}
+
+function parseTimestampToEpochNanos(input: string | undefined): bigint | undefined {
+  if (!input) {
+    return undefined;
+  }
+
+  const trimmed = input.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const secondsNanos = parseSecondsToEpochNanos(trimmed);
+  if (secondsNanos !== undefined) {
+    return secondsNanos;
+  }
+
+  const zuluMatch = trimmed.match(
+    /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.([0-9]{1,9}))?Z$/
+  );
+  if (zuluMatch) {
+    const wholeSecondsMs = Date.parse(`${zuluMatch[1]}Z`);
+    if (Number.isNaN(wholeSecondsMs)) {
+      return undefined;
+    }
+
+    const fraction = (zuluMatch[2] ?? '').padEnd(9, '0');
+    return BigInt(wholeSecondsMs) * NANOSECONDS_PER_MILLISECOND + BigInt(fraction || '0');
+  }
+
+  const asDateMs = Date.parse(trimmed);
+  if (Number.isNaN(asDateMs)) {
+    return undefined;
+  }
+
+  return BigInt(asDateMs) * NANOSECONDS_PER_MILLISECOND;
+}
+
 function parseLogLine(line: string): { timestamp: string; message: string } | null {
   const trimmed = line.trim();
   if (!trimmed) {
@@ -222,7 +273,21 @@ export class DockerodeRuntime implements DockerRuntime {
   ): AsyncIterable<RuntimeLogLine> {
     const container = this.docker.getContainer(containerId);
     const since = parseSince(options.since);
+    const sinceCursorNanos = parseTimestampToEpochNanos(options.since);
     const tail = parseTail(options.tail);
+    const shouldIncludeTimestamp = (timestamp: string): boolean => {
+      if (sinceCursorNanos === undefined) {
+        return true;
+      }
+
+      const lineTimestampNanos = parseTimestampToEpochNanos(timestamp);
+      if (lineTimestampNanos === undefined) {
+        return true;
+      }
+
+      return lineTimestampNanos > sinceCursorNanos;
+    };
+
     const raw = options.follow
       ? await container.logs({
           follow: true,
@@ -247,7 +312,7 @@ export class DockerodeRuntime implements DockerRuntime {
         for (const frame of parsedFrames) {
           for (const line of frame.payload.split('\n')) {
             const parsed = parseLogLine(line);
-            if (!parsed) {
+            if (!parsed || !shouldIncludeTimestamp(parsed.timestamp)) {
               continue;
             }
             yield {
@@ -263,7 +328,7 @@ export class DockerodeRuntime implements DockerRuntime {
       const text = raw.toString('utf8');
       for (const line of text.split('\n')) {
         const parsed = parseLogLine(line);
-        if (!parsed) {
+        if (!parsed || !shouldIncludeTimestamp(parsed.timestamp)) {
           continue;
         }
         yield {
@@ -279,7 +344,7 @@ export class DockerodeRuntime implements DockerRuntime {
     if (rawAsString !== null) {
       for (const line of rawAsString.split('\n')) {
         const parsed = parseLogLine(line);
-        if (!parsed) {
+        if (!parsed || !shouldIncludeTimestamp(parsed.timestamp)) {
           continue;
         }
         yield {
@@ -310,7 +375,7 @@ export class DockerodeRuntime implements DockerRuntime {
 
     const onLine = (which: 'stdout' | 'stderr', line: string): void => {
       const parsed = parseLogLine(line);
-      if (!parsed) {
+      if (!parsed || !shouldIncludeTimestamp(parsed.timestamp)) {
         return;
       }
       queue.push({

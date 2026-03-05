@@ -91,7 +91,7 @@ describe('DockerodeRuntime', () => {
   it('passes tail and since options when requesting container logs', async () => {
     const logs = vi
       .fn()
-      .mockResolvedValue('2026-03-01T00:00:00.000000000Z hello from docker\n');
+      .mockResolvedValue('2026-03-01T00:00:00.000000001Z hello from docker\n');
     const runtime = new DockerodeRuntime({
       getContainer: vi.fn().mockReturnValue({ logs }),
       modem: { demuxStream: vi.fn() }
@@ -115,6 +115,42 @@ describe('DockerodeRuntime', () => {
         timestamps: true,
         since: Math.floor(new Date('2026-03-01T00:00:00.000Z').getTime() / 1000),
         tail: 42
+      })
+    );
+  });
+
+  it('filters out log lines at or before since cursor', async () => {
+    const logs = vi.fn().mockResolvedValue(
+      [
+        '2026-03-01T00:00:00.400000000Z old line',
+        '2026-03-01T00:00:00.500000000Z duplicate line',
+        '2026-03-01T00:00:00.500000001Z new line'
+      ].join('\n')
+    );
+    const runtime = new DockerodeRuntime({
+      getContainer: vi.fn().mockReturnValue({ logs }),
+      modem: { demuxStream: vi.fn() }
+    } as unknown as Dockerode);
+
+    const received = [];
+    for await (const event of runtime.streamContainerLogs('container-logs', {
+      follow: true,
+      since: '2026-03-01T00:00:00.500000000Z'
+    })) {
+      received.push(event);
+    }
+
+    expect(received).toEqual([
+      {
+        stream: 'stdout',
+        timestamp: '2026-03-01T00:00:00.500000001Z',
+        line: 'new line'
+      }
+    ]);
+    expect(logs).toHaveBeenCalledWith(
+      expect.objectContaining({
+        since: Math.floor(new Date('2026-03-01T00:00:00.500000000Z').getTime() / 1000),
+        follow: true
       })
     );
   });
