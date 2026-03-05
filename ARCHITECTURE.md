@@ -30,6 +30,11 @@ flowchart LR
 - Web and CLI are unprivileged API consumers and never access Docker or DB directly.
 - API and web are deployed as separate containers/services.
 
+## Runtime network model
+- Each created box is assigned a dedicated Docker network (`devbox-net-<boxId>`) by the orchestrator and attached to that network as its container `NetworkMode`.
+- Boxes are therefore isolated from each other by default at the Docker-network level (no shared box network).
+- Caveat: these per-box networks use Docker bridge defaults (not `internal` and no egress policy), so outbound connectivity is still available from each box subject to host/Docker routing and firewall policy.
+
 ## Key references
 - Compose deployment wiring: [`docker-compose.yml`]
 - Environment contract: [`ENV.md`]
