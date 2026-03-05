@@ -123,6 +123,63 @@ function trimGlobal(
   return next;
 }
 
+function removeLogViewerState(current: DevboxState, boxId: string): DevboxState {
+  if (!current.openLogTabs.includes(boxId) && !current.logViewers[boxId]) {
+    return current;
+  }
+
+  const nextTabs = current.openLogTabs.filter((id) => id !== boxId);
+  const nextActive =
+    current.activeLogTab === boxId
+      ? nextTabs.length > 0
+        ? nextTabs[nextTabs.length - 1]
+        : null
+      : current.activeLogTab;
+  const nextViewers = { ...current.logViewers };
+  delete nextViewers[boxId];
+
+  return {
+    ...current,
+    openLogTabs: nextTabs,
+    activeLogTab: nextActive,
+    logViewers: nextViewers
+  };
+}
+
+function applyBoxUpdatedState(current: DevboxState, box: Box): DevboxState {
+  return {
+    ...current,
+    boxes: upsertBox(current.boxes, box),
+    error: null
+  };
+}
+
+function applyBoxRemovedState(current: DevboxState, boxId: string): DevboxState {
+  const next = removeLogViewerState(
+    {
+      ...current,
+      boxes: current.boxes.filter((box) => box.id !== boxId)
+    },
+    boxId
+  );
+  return {
+    ...next,
+    error: null
+  };
+}
+
+function applyBoxStatusState(
+  current: DevboxState,
+  boxId: string,
+  status: Box['status']
+): DevboxState {
+  return {
+    ...current,
+    boxes: current.boxes.map((box) => (box.id === boxId ? { ...box, status } : box)),
+    error: null
+  };
+}
+
 async function waitWithAbort(ms: number, signal: AbortSignal): Promise<void> {
   if (signal.aborted) {
     return;
@@ -286,57 +343,34 @@ export function createDevboxStore(initialBoxes: Box[], apiBaseUrl?: string, clie
 
   async function create(name: string): Promise<void> {
     const created = await apiClient.createBox({ name });
-    updateState((current) => ({
-      ...current,
-      boxes: upsertBox(current.boxes, created.box),
-      error: null
-    }));
+    updateState((current) => applyBoxUpdatedState(current, created.box));
   }
 
   async function stop(boxId: string): Promise<void> {
     await apiClient.stopBox(boxId);
-    updateState((current) => ({
-      ...current,
-      boxes: current.boxes.map((box) => (box.id === boxId ? { ...box, status: 'stopping' } : box)),
-      error: null
-    }));
+    updateState((current) => applyBoxStatusState(current, boxId, 'stopping'));
   }
 
   async function start(boxId: string): Promise<void> {
     await apiClient.startBox(boxId);
-    state.update((current) => ({
-      ...current,
-      boxes: current.boxes.map((box) => (box.id === boxId ? { ...box, status: 'starting' } : box)),
-      error: null
-    }));
+    updateState((current) => applyBoxStatusState(current, boxId, 'starting'));
   }
 
   async function remove(boxId: string): Promise<void> {
     await apiClient.removeBox(boxId);
-    closeLogs(boxId);
-    updateState((current) => ({
-      ...current,
-      boxes: current.boxes.map((box) => (box.id === boxId ? { ...box, status: 'removing' } : box)),
-      error: null
-    }));
+    stopLogStream(boxId);
+    updateState((current) => removeLogViewerState(applyBoxStatusState(current, boxId, 'removing'), boxId));
   }
 
   function applyStreamEvent(event: ApiStreamEvent): void {
     if (event.event === 'box.updated') {
-      updateState((current) => ({
-        ...current,
-        boxes: upsertBox(current.boxes, event.data.box),
-        error: null
-      }));
+      updateState((current) => applyBoxUpdatedState(current, event.data.box));
       return;
     }
 
     if (event.event === 'box.removed') {
-      updateState((current) => ({
-        ...current,
-        boxes: current.boxes.filter((box) => box.id !== event.data.boxId),
-        error: null
-      }));
+      stopLogStream(event.data.boxId);
+      updateState((current) => applyBoxRemovedState(current, event.data.boxId));
     }
   }
 
@@ -621,25 +655,7 @@ export function createDevboxStore(initialBoxes: Box[], apiBaseUrl?: string, clie
 
   function closeLogs(boxId: string): void {
     stopLogStream(boxId);
-
-    updateState((current) => {
-      if (!current.openLogTabs.includes(boxId) && !current.logViewers[boxId]) {
-        return current;
-      }
-
-      const nextTabs = current.openLogTabs.filter((id) => id !== boxId);
-      const nextActive =
-        current.activeLogTab === boxId ? (nextTabs.length > 0 ? nextTabs[nextTabs.length - 1] : null) : current.activeLogTab;
-      const nextViewers = { ...current.logViewers };
-      delete nextViewers[boxId];
-
-      return {
-        ...current,
-        openLogTabs: nextTabs,
-        activeLogTab: nextActive,
-        logViewers: nextViewers
-      };
-    });
+    updateState((current) => removeLogViewerState(current, boxId));
   }
 
   function setLogTail(boxId: string, tail: number): void {

@@ -244,6 +244,86 @@ describe('createDevboxStore', () => {
     unsubscribe();
   });
 
+  it('closes log tabs when box.removed events arrive over SSE', async () => {
+    const initial = makeBox();
+
+    const client = {
+      async createBox() {
+        return { box: initial };
+      },
+      async listBoxes() {
+        return [initial];
+      },
+      async startBox() {
+        return {};
+      },
+      async stopBox() {
+        return {};
+      },
+      async removeBox() {
+        return {};
+      },
+      async streamEvents(options?: { signal?: AbortSignal }) {
+        async function* events(): AsyncIterable<ApiStreamEvent> {
+          yield {
+            event: 'box.removed',
+            data: { type: 'box.removed', boxId: initial.id }
+          };
+
+          await new Promise<void>((resolve) => {
+            if (!options?.signal || options.signal.aborted) {
+              resolve();
+              return;
+            }
+            options.signal.addEventListener('abort', () => resolve(), { once: true });
+          });
+        }
+        return events();
+      },
+      async streamBoxLogs() {
+        async function* logs(): AsyncIterable<BoxLogsEvent> {
+          yield {
+            event: 'box.logs',
+            data: {
+              boxId: initial.id,
+              stream: 'stdout',
+              line: 'line-1',
+              timestamp: new Date('2026-01-01T00:00:00.000Z').toISOString()
+            }
+          };
+        }
+        return logs();
+      }
+    };
+
+    const store = createDevboxStore([initial], undefined, client);
+    let latest = {
+      boxes: [initial],
+      error: null as string | null,
+      loading: false,
+      openLogTabs: [] as string[],
+      activeLogTab: null as string | null,
+      logViewers: {} as Record<string, unknown>
+    };
+    const unsubscribe = store.subscribe((value) => {
+      latest = value;
+    });
+
+    await store.openLogs(initial.id);
+    expect(latest.openLogTabs).toEqual([initial.id]);
+    expect(latest.logViewers[initial.id]).toBeTruthy();
+
+    const disconnect = await store.connectEvents();
+    await waitForCondition(() => latest.boxes.length === 0);
+    await waitForCondition(() => latest.openLogTabs.length === 0);
+
+    expect(latest.activeLogTab).toBeNull();
+    expect(latest.logViewers[initial.id]).toBeUndefined();
+
+    disconnect();
+    unsubscribe();
+  });
+
   it('marks boxes as starting when start is requested', async () => {
     const initial = makeBox({ status: 'stopped' });
 
