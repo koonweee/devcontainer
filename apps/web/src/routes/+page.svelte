@@ -201,28 +201,30 @@
 
             <!-- Tailnet URL -->
             {#if box.tailnetUrl}
-              <div class="flex min-w-0 flex-1 items-center gap-1.5">
-                <span class="min-w-0 flex-1 truncate font-mono text-xs text-cyan-400/80" title={sshCommand(box) ?? box.tailnetUrl}>
-                  {sshCommand(box)}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onclick={() => copySshCommand(box)}
-                  class="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
-                  title={copiedSshBoxId === box.id ? 'Copied' : 'Copy SSH command'}
-                >
-                  {#if copiedSshBoxId === box.id}
-                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M20 6 9 17l-5-5" />
-                    </svg>
-                  {:else}
-                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                    </svg>
-                  {/if}
-                </Button>
+              <div class="min-w-0 flex-1">
+                <div class="inline-flex max-w-full items-center gap-1 rounded-md border border-cyan-500/30 bg-cyan-500/5 px-1.5 py-0.5">
+                  <span class="max-w-[28rem] truncate font-mono text-xs text-cyan-400/90" title={sshCommand(box) ?? box.tailnetUrl}>
+                    {sshCommand(box)}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onclick={() => copySshCommand(box)}
+                    class="h-6 w-6 shrink-0 text-cyan-300/70 hover:text-cyan-200"
+                    title={copiedSshBoxId === box.id ? 'Copied' : 'Copy SSH command'}
+                  >
+                    {#if copiedSshBoxId === box.id}
+                      <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M20 6 9 17l-5-5" />
+                      </svg>
+                    {:else}
+                      <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                      </svg>
+                    {/if}
+                  </Button>
+                </div>
               </div>
             {:else}
               <!-- Image -->
