@@ -41,23 +41,24 @@
     syncTerminal();
   }
 
-  onMount(async () => {
-    const { Terminal } = await import('@xterm/xterm');
-    terminal = new Terminal({
-      convertEol: true,
-      scrollback,
-      cursorBlink: false,
-      fontSize: 12,
-      fontFamily: '"JetBrains Mono", "IBM Plex Mono", "SFMono-Regular", Consolas, monospace',
-      theme: {
-        background: '#0a0a10',
-        foreground: '#d4dfef',
-        cursor: '#22d3ee',
-        selectionBackground: '#22d3ee33'
-      }
+  onMount(() => {
+    import('@xterm/xterm').then(({ Terminal }) => {
+      terminal = new Terminal({
+        convertEol: true,
+        scrollback,
+        cursorBlink: false,
+        fontSize: 12,
+        fontFamily: '"JetBrains Mono", "IBM Plex Mono", "SFMono-Regular", Consolas, monospace',
+        theme: {
+          background: '#0a0a10',
+          foreground: '#d4dfef',
+          cursor: '#22d3ee',
+          selectionBackground: '#22d3ee33'
+        }
+      });
+      terminal.open(host);
+      syncTerminal();
     });
-    terminal.open(host);
-    syncTerminal();
 
     return () => {
       terminal?.dispose();
