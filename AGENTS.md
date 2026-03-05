@@ -12,10 +12,15 @@ This repo builds a Docker-image-based dev box platform. Keep implementations sim
 ## Required repo docs maintenance
 - Always update root `USAGE.md` when working on this repo.
   - `USAGE.md` must contain exactly 2 sections: **Setting up** and **User flows**.
+  - `Setting up` must be split into: **For development** and **For deployment**.
   - Keep both sections brief and instruction-focused (no deep implementation detail).
 - Always update root `ARCHITECTURE.md` when working on this repo.
   - Keep it brief; describe structure and link to code where helpful.
   - Prefer diagrams for component/flow explanations when useful.
+- Exception for env-only changes:
+  - Update `ENV.md` and `.env.example` only.
+  - `.env.example` is for required variables (or explicitly required-by-context variables), not every optional toggle.
+  - Update `USAGE.md` / `ARCHITECTURE.md` only if setup flow or architecture boundaries changed.
 - Every plan must include explicit steps to update `USAGE.md` and `ARCHITECTURE.md`.
 - Every implementation must end with a review of whether `USAGE.md` / `ARCHITECTURE.md` need further updates.
 
@@ -48,11 +53,18 @@ This repo builds a Docker-image-based dev box platform. Keep implementations sim
 
 ## Simplicity and testing
 - No Redis/external queue unless proven necessary; start with DB + in-process job runner.
+- Keep test-only implementations in `packages/*/src/testing`.
+- Do not export test doubles from package root exports; expose them through explicit testing entrypoints.
+- Keep production modules free of test harness constructors; place harness setup in `apps/*/test/support`.
 - Add basic tests early for TDD:
   - orchestrator unit tests
   - Fastify route tests (`inject`)
   - optional minimal integration smoke tests
 - CI should run lint, typecheck, tests, and client generation checks.
+
+## Maintainability
+- Minimize user configuration surface; prefer zero-config defaults unless an env variable provides clear operational value.
+- Add brief JSDoc to each class describing intent; keep class JSDoc to 20 words or fewer.
 
 ## Plan quality requirements
 - Every plan must include a short **"Functional changes after implementation"** section that states user-visible behavior changes.

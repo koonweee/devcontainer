@@ -1,0 +1,106 @@
+import type {
+  ContainerDetails,
+  CreateContainerOptions,
+  DockerRuntime,
+  RuntimeLogLine,
+  RuntimeLogOptions
+} from '../runtime.js';
+
+interface FakeContainer {
+  id: string;
+  labels: Record<string, string>;
+  logs: RuntimeLogLine[];
+}
+
+/** Simulates Docker runtime behavior without touching Docker Engine. */
+export class MockDockerRuntime implements DockerRuntime {
+  readonly networks = new Set<string>();
+  readonly volumes = new Set<string>();
+  readonly containers = new Map<string, FakeContainer>();
+  failOn: Partial<Record<keyof DockerRuntime, Error>> = {};
+
+  private containerCounter = 0;
+
+  async createNetwork(name: string): Promise<void> {
+    this.throwIfConfigured('createNetwork');
+    this.networks.add(name);
+  }
+
+  async createVolume(name: string): Promise<void> {
+    this.throwIfConfigured('createVolume');
+    this.volumes.add(name);
+  }
+
+  async createContainer(options: CreateContainerOptions): Promise<string> {
+    this.throwIfConfigured('createContainer');
+    this.containerCounter += 1;
+    const id = `mock-${this.containerCounter}`;
+    this.containers.set(id, {
+      id,
+      labels: options.labels,
+      logs: []
+    });
+    return id;
+  }
+
+  async startContainer(): Promise<void> {
+    this.throwIfConfigured('startContainer');
+  }
+
+  async stopContainer(): Promise<void> {
+    this.throwIfConfigured('stopContainer');
+  }
+
+  async removeContainer(containerId: string): Promise<void> {
+    this.throwIfConfigured('removeContainer');
+    this.containers.delete(containerId);
+  }
+
+  async removeNetwork(name: string): Promise<void> {
+    this.throwIfConfigured('removeNetwork');
+    this.networks.delete(name);
+  }
+
+  async removeVolume(name: string): Promise<void> {
+    this.throwIfConfigured('removeVolume');
+    this.volumes.delete(name);
+  }
+
+  async inspectContainer(containerId: string): Promise<ContainerDetails | null> {
+    this.throwIfConfigured('inspectContainer');
+    const container = this.containers.get(containerId);
+    if (!container) {
+      return null;
+    }
+    return {
+      id: container.id,
+      labels: container.labels
+    };
+  }
+
+  async *streamContainerLogs(
+    containerId: string,
+    _options: RuntimeLogOptions
+  ): AsyncIterable<RuntimeLogLine> {
+    this.throwIfConfigured('streamContainerLogs');
+    const container = this.containers.get(containerId);
+    for (const log of container?.logs ?? []) {
+      yield log;
+    }
+  }
+
+  pushLog(containerId: string, log: RuntimeLogLine): void {
+    const container = this.containers.get(containerId);
+    if (!container) {
+      return;
+    }
+    container.logs.push(log);
+  }
+
+  private throwIfConfigured(method: keyof DockerRuntime): void {
+    const error = this.failOn[method];
+    if (error) {
+      throw error;
+    }
+  }
+}

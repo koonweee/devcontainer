@@ -1,46 +1,40 @@
 services:
-  tailscale:
-    image: tailscale/tailscale:stable
-    hostname: ${TS_HOSTNAME:-devcontainer}
-    cap_add:
-      - NET_ADMIN
-      - SYS_MODULE
-    devices:
-      - /dev/net/tun:/dev/net/tun
-    environment:
-      TS_AUTHKEY: ${TS_AUTHKEY}
-      TS_HOSTNAME: ${TS_HOSTNAME:-devcontainer}
-      TS_STATE_DIR: /var/lib/tailscale
-      TS_USERSPACE: "false"
-    volumes:
-      - tailscale-state:/var/lib/tailscale
-      - ./docker/ts-entrypoint.sh:/ts-entrypoint.sh:ro
-    entrypoint: ["/bin/sh", "/ts-entrypoint.sh"]
-    restart: unless-stopped
-
-  devcontainer:
+  api:
     build:
       context: .
-      dockerfile: Dockerfile
-      args:
-        DEV_USER: ${DEV_USER:-dev}
-        DEV_UID: ${DEV_UID:-1000}
-        DEV_GID: ${DEV_GID:-1000}
+      dockerfile: apps/api/Dockerfile
     environment:
-      DEV_USER: ${DEV_USER:-dev}
-      DEV_PASSWORD: ${DEV_PASSWORD}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
-    network_mode: "service:tailscale"
-    depends_on:
-      - tailscale
+      DEVBOX_DB_PATH: /data/devbox.sqlite
     volumes:
-      - workspace-data:/workspace
+      - /var/run/docker.sock:/var/run/docker.sock
+      - devbox-data:/data
+    ports:
+      - "3000:3000"
     restart: unless-stopped
-    stdin_open: true
-    tty: true
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    environment:
+      DEVBOX_INTERNAL_API_URL: http://api:3000
+      DEVBOX_PUBLIC_API_URL: http://localhost:3000
+    depends_on:
+      - api
+    ports:
+      - "4173:4173"
+    restart: unless-stopped
+
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: devbox
+      POSTGRES_PASSWORD: devbox
+      POSTGRES_DB: devbox
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
 
 volumes:
-  tailscale-state:
-  workspace-data:
+  devbox-data:
+  postgres-data:

@@ -1,0 +1,26 @@
+{
+  "name": "devbox-platform",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run -ws build",
+    "typecheck": "npm run -ws typecheck",
+    "test": "npm run -ws test",
+    "lint": "npm run typecheck",
+    "gen:openapi": "npm run -w @devbox/api gen:openapi",
+    "gen:client": "npm run gen:openapi && npm run -w @devbox/api-client gen",
+    "check:client": "npm run gen:client && git diff --exit-code -- apps/api/openapi/openapi.json packages/api-client/src/generated.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.18",
+    "@typescript-eslint/types": "^8.56.1",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.2",
+    "vitest": "^2.1.8"
+  }
+}
