@@ -57,7 +57,7 @@
         <strong>{box.name}</strong>
         <span>{box.image}</span>
         <span>{box.status}</span>
-        <button onclick={() => store.stop(box.id)}>Stop</button>
+        <button onclick={() => store.stop(box.id)} disabled={box.status !== 'running'}>Stop</button>
         <button onclick={() => store.remove(box.id)}>Remove</button>
       </li>
     {/each}
@@ -118,6 +118,11 @@
     cursor: pointer;
     background: #153f70;
     color: white;
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
   }
 
   ul {

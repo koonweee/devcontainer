@@ -4,7 +4,12 @@ import { NotFoundError, SecurityError, ValidationError } from './errors.js';
 import type { OrchestratorEvents } from './events.js';
 import { JobRunner, publishJob } from './job-runner.js';
 import type { BoxRepository, JobRepository } from './repositories.js';
-import { assertManaged, managedLabels, type DockerRuntime } from './runtime.js';
+import {
+  assertManaged,
+  managedLabels,
+  type ContainerRuntimeStatus,
+  type DockerRuntime
+} from './runtime.js';
 import type {
   Box,
   BoxFilter,
@@ -41,6 +46,8 @@ function isBoxNameConstraintError(error: unknown): boolean {
 
   return error.message.includes('UNIQUE constraint failed: boxes.name');
 }
+
+const STABLE_RECONCILE_STATUSES = new Set<Box['status']>(['running', 'stopped', 'error']);
 
 /** Coordinates box lifecycle operations, jobs, logs, and security checks. */
 export class DevboxOrchestrator {
@@ -130,11 +137,16 @@ export class DevboxOrchestrator {
   }
 
   async listBoxes(filter?: BoxFilter): Promise<Box[]> {
-    return this.boxes.list(filter);
+    const boxes = this.boxes.list(filter);
+    return Promise.all(boxes.map((box) => this.reconcileBoxForRead(box)));
   }
 
   async getBox(boxId: string): Promise<Box | null> {
-    return this.boxes.get(boxId);
+    const box = this.boxes.get(boxId);
+    if (!box) {
+      return null;
+    }
+    return this.reconcileBoxForRead(box);
   }
 
   async stopBox(boxId: string): Promise<Job> {
@@ -247,6 +259,103 @@ export class DevboxOrchestrator {
       this.events.emit('box.logs', { type: 'box.logs', boxId, log });
       yield log;
     }
+  }
+
+  private mapContainerStateToBoxStatus(status: ContainerRuntimeStatus): Box['status'] {
+    switch (status) {
+      case 'running':
+      case 'restarting':
+      case 'paused':
+        return 'running';
+      case 'created':
+      case 'exited':
+        return 'stopped';
+      default:
+        return 'error';
+    }
+  }
+
+  private async reconcileBoxForRead(box: Box): Promise<Box> {
+    if (box.deletedAt || !STABLE_RECONCILE_STATUSES.has(box.status)) {
+      return box;
+    }
+
+    if (!box.containerId) {
+      return (
+        this.updateBoxIfChanged(box.id, {
+          status: 'error',
+          containerId: null
+        }) ?? box
+      );
+    }
+
+    let details: Awaited<ReturnType<DockerRuntime['inspectContainer']>>;
+    try {
+      details = await this.runtime.inspectContainer(box.containerId);
+    } catch {
+      // Read paths must stay available if runtime inspect transiently fails.
+      return box;
+    }
+
+    if (!details) {
+      return (
+        this.updateBoxIfChanged(box.id, {
+          status: 'error',
+          containerId: null
+        }) ?? box
+      );
+    }
+
+    try {
+      assertManaged(details.labels, box.id);
+    } catch {
+      return (
+        this.updateBoxIfChanged(box.id, {
+          status: 'error',
+          containerId: box.containerId
+        }) ?? box
+      );
+    }
+
+    if (box.status === 'error') {
+      return box;
+    }
+
+    return (
+      this.updateBoxIfChanged(box.id, {
+        status: this.mapContainerStateToBoxStatus(details.status),
+        containerId: box.containerId
+      }) ?? box
+    );
+  }
+
+  private updateBoxIfChanged(
+    boxId: string,
+    patch: {
+      status?: Box['status'];
+      containerId?: string | null;
+    }
+  ): Box | null {
+    const current = this.boxes.get(boxId);
+    if (!current) {
+      return null;
+    }
+
+    if (current.deletedAt || !STABLE_RECONCILE_STATUSES.has(current.status)) {
+      return current;
+    }
+
+    const nextStatus = patch.status ?? current.status;
+    const nextContainerId = patch.containerId === undefined ? current.containerId : patch.containerId;
+
+    if (current.status === nextStatus && current.containerId === nextContainerId) {
+      return current;
+    }
+
+    return this.boxes.update(boxId, {
+      status: nextStatus,
+      containerId: nextContainerId
+    });
   }
 
   private markBoxError(boxId: string): void {

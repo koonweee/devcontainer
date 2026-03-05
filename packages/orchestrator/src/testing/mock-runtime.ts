@@ -1,5 +1,6 @@
 import type {
   ContainerDetails,
+  ContainerRuntimeStatus,
   CreateContainerOptions,
   DockerRuntime,
   RuntimeLogLine,
@@ -9,6 +10,7 @@ import type {
 interface FakeContainer {
   id: string;
   labels: Record<string, string>;
+  status: ContainerRuntimeStatus;
   logs: RuntimeLogLine[];
 }
 
@@ -38,17 +40,28 @@ export class MockDockerRuntime implements DockerRuntime {
     this.containers.set(id, {
       id,
       labels: options.labels,
+      status: 'created',
       logs: []
     });
     return id;
   }
 
-  async startContainer(): Promise<void> {
+  async startContainer(containerId: string): Promise<void> {
     this.throwIfConfigured('startContainer');
+    const container = this.containers.get(containerId);
+    if (!container) {
+      return;
+    }
+    container.status = 'running';
   }
 
-  async stopContainer(): Promise<void> {
+  async stopContainer(containerId: string): Promise<void> {
     this.throwIfConfigured('stopContainer');
+    const container = this.containers.get(containerId);
+    if (!container) {
+      return;
+    }
+    container.status = 'exited';
   }
 
   async removeContainer(containerId: string): Promise<void> {
@@ -74,7 +87,8 @@ export class MockDockerRuntime implements DockerRuntime {
     }
     return {
       id: container.id,
-      labels: container.labels
+      labels: container.labels,
+      status: container.status
     };
   }
 
@@ -95,6 +109,14 @@ export class MockDockerRuntime implements DockerRuntime {
       return;
     }
     container.logs.push(log);
+  }
+
+  setContainerStatus(containerId: string, status: ContainerRuntimeStatus): void {
+    const container = this.containers.get(containerId);
+    if (!container) {
+      return;
+    }
+    container.status = status;
   }
 
   private throwIfConfigured(method: keyof DockerRuntime): void {
