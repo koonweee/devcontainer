@@ -1,87 +1,23 @@
-# Tailnet-only SSH devcontainer
+# Devbox Platform
 
-This stack runs a Debian Trixie dev container behind a Tailscale sidecar.
+Monorepo for a Docker-image-based dev box platform with strict privilege boundaries.
 
-## What you get
+## Components
 
-- Base image: `debian:trixie-slim`
-- Tools: `vim`, `tmux`, `mosh`, `zsh`
-- Minimal Node/TS deps: `git`, `curl`, `ca-certificates`, `openssh-server`, `sudo`, `ripgrep`, `less`, `procps`, `iproute2`, `xz-utils`, `unzip`
-- Node.js: major `22` (NodeSource)
-- CLIs installed at build: `codex` and `gemini`
-- Non-root `dev` user with passwordless sudo
-- SSH password auth enabled, key auth disabled
-- Persistent workspace volume mounted at `/workspace`
-- Tailnet-only ingress firewall in the shared namespace
+- `packages/orchestrator`: framework-agnostic orchestration library (jobs, lifecycle, Docker allowlist).
+- `apps/api`: Fastify API adapter around orchestrator calls and SSE streams.
+- `apps/web`: SvelteKit web client using generated API client + SSE after hydration.
+- `apps/cli`: API-only CLI client for create/list/stop/remove/logs flows.
+- `packages/api-client`: generated typed client from OpenAPI, shared by web and CLI.
+- `docker/runtime/Dockerfile`: runtime image used for created dev boxes.
 
-## Setup
+## Quick start
 
-1. Create env file:
+1. Install dependencies: `npm install`
+2. Build runtime image: `npm run build:runtime-image`
+3. Generate client contracts: `npm run gen:client`
+4. Start API + web: `docker compose up --build`
 
-```bash
-cp .env.example .env
-```
-
-2. Update `.env` with your values:
-
-- `TS_AUTHKEY`: your Tailscale auth key
-- `TS_HOSTNAME`: hostname to register on your tailnet
-- `DEV_PASSWORD`: SSH password for user `dev`
-- Optional: `DEV_USER`, `DEV_UID`, `DEV_GID`
-- Optional: `OPENAI_API_KEY`, `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) for CLI auth
-
-3. Start:
-
-```bash
-docker compose up -d --build
-```
-
-4. Check Tailscale status:
-
-```bash
-docker compose logs -f tailscale
-```
-
-5. SSH in over tailnet:
-
-```bash
-ssh dev@<TS_HOSTNAME>
-```
-
-6. Verify bundled CLIs:
-
-```bash
-codex --version
-gemini --version
-```
-
-## Network behavior
-
-- `devcontainer` shares `tailscale` service network namespace.
-- Inbound traffic is restricted via iptables rules to:
-  - `tailscale0` traffic
-  - `lo`
-  - established/related connections
-  - UDP `41641` on `eth0` for direct Tailscale peer traffic
-- No host ports are published in Compose.
-
-## Port access from tailnet
-
-If you run a service in the dev container on `0.0.0.0`, it is reachable from tailnet peers on the same Tailscale hostname.
-
-Example:
-
-```bash
-node -e "require('http').createServer((_,res)=>res.end('ok')).listen(3000,'0.0.0.0')"
-```
-
-Then from another tailnet device:
-
-```bash
-curl http://<TS_HOSTNAME>:3000
-```
-
-## Persistence
-
-- Workspace data is stored in named volume `workspace-data` at `/workspace`.
-- Tailscale state is stored in named volume `tailscale-state`.
+For setup details and user flows, see `USAGE.md`.  
+For architecture boundaries and component relationships, see `ARCHITECTURE.md`.  
+For environment variables, defaults, and recommendations, see `ENV.md`.

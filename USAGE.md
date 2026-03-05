@@ -3,7 +3,7 @@
 1. Install Node.js 22+ and Docker.
 2. Install dependencies: `npm install`.
 3. Review env defaults: `ENV.md` and `.env.example`; set box-runtime envs in `docker/runtime/runtime.env`.
-4. Build the runtime image from repo root Dockerfile: `npm run build:runtime-image`.
+4. Build the runtime image from `docker/runtime/Dockerfile`: `npm run build:runtime-image`.
 5. Generate contracts: `npm run gen:client`.
 6. Start stack: `docker compose up --build`.
 7. Compose runs two services (`api`, `web`); API persists state in SQLite via the `devbox-data` volume (`DEVBOX_DB_PATH=/data/devbox.sqlite` by default).
@@ -12,7 +12,7 @@
 10. Match CI locally before opening a PR: `npm run lint && npm run test && npm run build && npm run check:client`.
 
 ### For deployment
-1. Build and publish your runtime box image from root `Dockerfile` (or equivalent CI build), then set `DEVBOX_RUNTIME_IMAGE` to that tag/digest.
+1. Build and publish your runtime box image from `docker/runtime/Dockerfile` (or equivalent CI build), then set `DEVBOX_RUNTIME_IMAGE` to that tag/digest.
 2. Configure runtime values in `ENV.md` (usually `DEVBOX_RUNTIME_IMAGE`, `DEVBOX_PUBLIC_API_URL`, `DEVBOX_INTERNAL_API_URL`, `DEVBOX_API_URL`, `DEVBOX_DB_PATH`) and set box-runtime envs in `docker/runtime/runtime.env`.
 3. Build and start services with your target orchestrator or Compose profile (`api` + `web`), and mount persistent storage for SQLite at `DEVBOX_DB_PATH`.
 4. Ensure API container can access `/var/run/docker.sock`; do not grant that mount to web/CLI.

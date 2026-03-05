@@ -16,7 +16,7 @@ This project is set up so local development works without custom env configurati
 
 - `DEVBOX_RUNTIME_IMAGE` (default: `devbox-runtime:local`)
   - Fixed Docker image used for all box creation requests.
-  - Recommendation: build/tag from repo root Dockerfile before starting API (`npm run build:runtime-image`).
+  - Recommendation: build/tag from `docker/runtime/Dockerfile` before starting API (`npm run build:runtime-image`).
 
 - `DEVBOX_RUNTIME_ENV_FILE` (default fallback resolves `docker/runtime/runtime.env` from repo)
   - File path containing env entries to inject into every created box.
