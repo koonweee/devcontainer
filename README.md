@@ -2,7 +2,7 @@
 
 Monorepo for a Docker-image-based dev box platform with strict privilege boundaries.
 
-## Components
+## Workspace components
 
 - `packages/orchestrator`: framework-agnostic orchestration library (jobs, lifecycle, Docker allowlist).
 - `apps/api`: Fastify API adapter around orchestrator calls and SSE streams.
@@ -11,13 +11,9 @@ Monorepo for a Docker-image-based dev box platform with strict privilege boundar
 - `packages/api-client`: generated typed client from OpenAPI, shared by web and CLI.
 - `docker/runtime/Dockerfile`: runtime image used for created dev boxes.
 
-## Quick start
+## Canonical docs
 
-1. Install dependencies: `npm install`
-2. Build runtime image: `npm run build:runtime-image`
-3. Generate client contracts: `npm run gen:client`
-4. Start API + web: `docker compose up --build`
-
-For setup details and user flows, see `USAGE.md`.  
-For architecture boundaries and component relationships, see `ARCHITECTURE.md`.  
-For environment variables, defaults, and recommendations, see `ENV.md`.
+- Setup and user workflows: [USAGE.md](USAGE.md)
+- Architecture boundaries and component responsibilities: [ARCHITECTURE.md](ARCHITECTURE.md)
+- Environment variables (required/optional/defaults): [ENV.md](ENV.md)
+- Contributor guardrails and documentation rules: [AGENTS.md](AGENTS.md)

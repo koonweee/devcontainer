@@ -1,15 +1,24 @@
 # Environment variables
 
-This project is set up so local development works without custom env configuration.
+Canonical reference for runtime environment variables and defaults.
 
 ## Required
 - Local development: none.
-- Production/deployment: set values only when defaults do not match your network/storage layout.
+- Deployment: set required-by-context values when defaults do not match your network/storage layout.
+
+## Required by context
+- `DEVBOX_RUNTIME_IMAGE`
+  - Set this in deployment to a published runtime image tag/digest.
+- `DEVBOX_PUBLIC_API_URL`
+  - Set this when browser clients cannot reach API at the default.
+- `DEVBOX_INTERNAL_API_URL`
+  - Set this when web server-side calls should target service DNS/internal network.
+- `DEVBOX_API_URL`
+  - Set this when CLI should target a non-local API.
+- `DEVBOX_DB_PATH`
+  - Set this when default SQLite path does not match your persistent storage mount.
 
 ## Optional (with defaults)
-- API bind/port are fixed by the service (`0.0.0.0:3000`) and not user-configurable env vars.
-- Recommendation: remap published ports in Compose/ingress instead of changing API process bind settings.
-
 - `DEVBOX_DB_PATH` (default: `devbox.sqlite` in process cwd; Compose sets `/data/devbox.sqlite`)
   - SQLite file location used by orchestrator state repositories.
   - Recommendation: use a persistent volume-backed path in containers.
@@ -35,10 +44,7 @@ This project is set up so local development works without custom env configurati
   - CLI API base URL.
   - Recommendation: point to your deployed API endpoint when using CLI remotely.
 
-## Minimal configuration recommendation
-1. Start with no custom env values.
-2. Override only `DEVBOX_PUBLIC_API_URL` if browser clients cannot reach API at `http://localhost:3000`.
-3. Override `DEVBOX_API_URL` only when CLI targets a non-local API.
-4. Keep `DEVBOX_DB_PATH` default unless you have explicit storage constraints.
-5. Keep `DEVBOX_RUNTIME_IMAGE` default unless you need a different tag/digest.
-6. Set required runtime env entries in `docker/runtime/runtime.env` for runtime image requirements (for example, SSH password env).
+## Notes
+- API bind/port are fixed by the service (`0.0.0.0:3000`) and are not configured through env vars.
+- Keep runtime container env entries in `docker/runtime/runtime.env`.
+- For setup steps and operational flows, use `USAGE.md`.

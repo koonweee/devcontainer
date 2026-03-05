@@ -10,19 +10,39 @@ This repo builds a Docker-image-based dev box platform. Keep implementations sim
 - Deploy orchestrator/API container separately from web container.
 
 ## Required repo docs maintenance
-- Always update root `USAGE.md` when working on this repo.
-  - `USAGE.md` must contain exactly 2 sections: **Setting up** and **User flows**.
-  - `Setting up` must be split into: **For development** and **For deployment**.
-  - Keep both sections brief and instruction-focused (no deep implementation detail).
-- Always update root `ARCHITECTURE.md` when working on this repo.
-  - Keep it brief; describe structure and link to code where helpful.
-  - Prefer diagrams for component/flow explanations when useful.
+- Single source of truth policy:
+  - `README.md` is entrypoint/navigation only.
+    - Must include: short project description, component list, and links to canonical docs.
+    - Must not include: detailed setup steps, deep architecture behavior, or env variable catalogs.
+  - `USAGE.md` is setup and user workflow instructions only.
+    - Must contain exactly 2 top-level sections: **Setting up** and **User flows**.
+    - `Setting up` must be split into: **For development** and **For deployment**.
+    - Must not include deep implementation internals.
+  - `ARCHITECTURE.md` is boundaries and component responsibilities only.
+    - Keep it brief; include structure and links to code where helpful.
+    - Prefer diagrams for component/flow explanations when useful.
+    - Must not include step-by-step setup commands or runbooks.
+  - `ENV.md` is the environment variable reference.
+    - Must include required/optional/default/recommendation context.
+    - Must not duplicate architecture narratives or setup walkthroughs.
+  - `.env.example` is for required variables (or explicitly required-by-context variables), not every optional toggle.
+  - `plans/*.md` are planning artifacts and are non-canonical for current runtime/setup behavior.
+- Anti-duplication rules:
+  - If content belongs to another canonical doc, link to it instead of restating it.
+  - Prefer brief summaries plus links over copied detail.
+- Doc-change trigger checklist:
+  - Setup flow changed: update `USAGE.md`.
+  - Architecture boundary changed: update `ARCHITECTURE.md`.
+  - Env contract changed: update `ENV.md` and `.env.example`.
+  - README updates should stay as links/summaries unless onboarding entrypoints changed.
 - Exception for env-only changes:
   - Update `ENV.md` and `.env.example` only.
-  - `.env.example` is for required variables (or explicitly required-by-context variables), not every optional toggle.
   - Update `USAGE.md` / `ARCHITECTURE.md` only if setup flow or architecture boundaries changed.
 - Every plan must include explicit steps to update `USAGE.md` and `ARCHITECTURE.md`.
 - Every implementation must end with a review of whether `USAGE.md` / `ARCHITECTURE.md` need further updates.
+- PR completion gate:
+  - List exactly which canonical docs were updated and why.
+  - Confirm no duplicated canonical content was introduced.
 
 ## Security and privileged boundary
 - Treat `docker.sock` access as privileged.
