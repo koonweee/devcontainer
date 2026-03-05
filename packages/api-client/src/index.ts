@@ -1,4 +1,6 @@
+import createClient from 'openapi-fetch';
 import { parseServerSentEvents } from 'parse-sse';
+
 import type { paths } from './generated.js';
 
 export type Box =
@@ -22,38 +24,50 @@ export interface ApiClientOptions {
   fetchImpl?: typeof fetch;
 }
 
-interface RequestOptions {
-  method?: 'GET' | 'POST' | 'DELETE';
-  body?: unknown;
-  query?: Record<string, string | number | boolean | undefined>;
-}
-
-function joinUrl(base: string, path: string): string {
-  const normalizedBase = base.endsWith('/') ? base.slice(0, -1) : base;
-  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-  return `${normalizedBase}${normalizedPath}`;
-}
-
-function withQuery(path: string, query?: RequestOptions['query']): string {
-  if (!query) {
-    return path;
-  }
-  const params = new URLSearchParams();
-  for (const [key, value] of Object.entries(query)) {
+function buildUrl(
+  baseUrl: string,
+  path: string,
+  query?: Record<string, string | number | boolean | undefined>
+): string {
+  const url = new URL(path, baseUrl);
+  for (const [key, value] of Object.entries(query ?? {})) {
     if (value !== undefined) {
-      params.set(key, String(value));
+      url.searchParams.set(key, String(value));
     }
   }
-  const q = params.toString();
-  return q.length === 0 ? path : `${path}?${q}`;
+  return url.toString();
 }
 
-async function parseResponse<T>(response: Response): Promise<T> {
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`API error ${response.status}: ${text}`);
+function formatOpenApiError(error: unknown): string {
+  if (error === undefined) {
+    return 'Unknown API error';
   }
-  return (await response.json()) as T;
+
+  if (typeof error === 'string') {
+    return error;
+  }
+
+  if (typeof error === 'object' && error !== null) {
+    if ('message' in error && typeof (error as { message?: unknown }).message === 'string') {
+      return (error as { message: string }).message;
+    }
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return 'API error (unserializable payload)';
+    }
+  }
+
+  return String(error);
+}
+
+function unwrap<T>(result: { data?: T; error?: unknown; response: Response }): T {
+  if (result.error !== undefined || result.data === undefined) {
+    const message = formatOpenApiError(result.error);
+    throw new Error(`API error ${result.response.status}: ${message}`);
+  }
+
+  return result.data;
 }
 
 async function* parseSse<T>(response: Response): AsyncIterable<SseEvent<T>> {
@@ -82,21 +96,16 @@ async function* parseSse<T>(response: Response): AsyncIterable<SseEvent<T>> {
 
 export function createApiClient(options: ApiClientOptions) {
   const fetchImpl = options.fetchImpl ?? fetch;
+  const client = createClient<paths>({
+    baseUrl: options.baseUrl,
+    fetch: fetchImpl
+  });
 
-  async function request<T>(path: string, req?: RequestOptions): Promise<T> {
-    const response = await fetchImpl(joinUrl(options.baseUrl, withQuery(path, req?.query)), {
-      method: req?.method ?? 'GET',
-      headers: {
-        'content-type': 'application/json'
-      },
-      body: req?.body ? JSON.stringify(req.body) : undefined
-    });
-
-    return parseResponse<T>(response);
-  }
-
-  async function sse<T>(path: string, query?: RequestOptions['query']): Promise<AsyncIterable<SseEvent<T>>> {
-    const response = await fetchImpl(joinUrl(options.baseUrl, withQuery(path, query)), {
+  async function sse<T>(
+    path: string,
+    query?: Record<string, string | number | boolean | undefined>
+  ): Promise<AsyncIterable<SseEvent<T>>> {
+    const response = await fetchImpl(buildUrl(options.baseUrl, path, query), {
       headers: {
         accept: 'text/event-stream'
       }
@@ -105,39 +114,32 @@ export function createApiClient(options: ApiClientOptions) {
   }
 
   return {
-    createBox(input: CreateBoxInput): Promise<{ box: Box; job: Job }> {
-      return request('/v1/boxes', {
-        method: 'POST',
-        body: input
-      });
+    async createBox(input: CreateBoxInput): Promise<{ box: Box; job: Job }> {
+      return unwrap(await client.POST('/v1/boxes', { body: input }));
     },
 
-    listBoxes(): Promise<Box[]> {
-      return request('/v1/boxes');
+    async listBoxes(): Promise<Box[]> {
+      return unwrap(await client.GET('/v1/boxes'));
     },
 
-    getBox(boxId: string): Promise<Box> {
-      return request(`/v1/boxes/${boxId}`);
+    async getBox(boxId: string): Promise<Box> {
+      return unwrap(await client.GET('/v1/boxes/{boxId}', { params: { path: { boxId } } }));
     },
 
-    stopBox(boxId: string): Promise<Job> {
-      return request(`/v1/boxes/${boxId}/stop`, {
-        method: 'POST'
-      });
+    async stopBox(boxId: string): Promise<Job> {
+      return unwrap(await client.POST('/v1/boxes/{boxId}/stop', { params: { path: { boxId } } }));
     },
 
-    removeBox(boxId: string): Promise<Job> {
-      return request(`/v1/boxes/${boxId}`, {
-        method: 'DELETE'
-      });
+    async removeBox(boxId: string): Promise<Job> {
+      return unwrap(await client.DELETE('/v1/boxes/{boxId}', { params: { path: { boxId } } }));
     },
 
-    listJobs(): Promise<Job[]> {
-      return request('/v1/jobs');
+    async listJobs(): Promise<Job[]> {
+      return unwrap(await client.GET('/v1/jobs'));
     },
 
-    getJob(jobId: string): Promise<Job> {
-      return request(`/v1/jobs/${jobId}`);
+    async getJob(jobId: string): Promise<Job> {
+      return unwrap(await client.GET('/v1/jobs/{jobId}', { params: { path: { jobId } } }));
     },
 
     streamEvents(): Promise<AsyncIterable<SseEvent>> {

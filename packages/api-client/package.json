@@ -16,6 +16,7 @@
     "openapi-typescript": "^7.6.1"
   },
   "dependencies": {
+    "openapi-fetch": "^0.17.0",
     "parse-sse": "^0.1.0"
   }
 }
