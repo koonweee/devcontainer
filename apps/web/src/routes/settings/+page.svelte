@@ -107,6 +107,10 @@
         >
           Get OAuth credentials
         </a>
+        <div class="mt-2 space-y-1">
+          <p>Required scopes: <code>auth_keys</code> write and <code>devices:core</code> write.</p>
+          <p>Required ACL: <code>tagOwners</code> must allow your tags (default <code>tag:devbox</code>).</p>
+        </div>
       </Card.Description>
     </Card.Header>
     <Card.Content>

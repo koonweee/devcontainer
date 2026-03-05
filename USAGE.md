@@ -16,7 +16,11 @@
 8. Configure Tailscale (required before creating boxes):
    - Web: complete the setup form shown on first load.
    - CLI: `npm run -w @devbox/cli start -- setup tailnet --tailnet <tailnet> --client-id <id> --client-secret <secret>`
-   - Requires a Tailscale OAuth client with device write scope and appropriate tags.
+   - OAuth client scopes required by this platform:
+     - `auth_keys` write (mint per-box auth keys)
+     - `devices:core` write (device lookup + cleanup delete)
+   - Ensure your ACL `tagOwners` allows configured tags (default `tag:devbox`), for example:
+     - `"tagOwners": { "tag:devbox": ["autogroup:admin", "tag:devbox"] }`
 9. Verify changes: `npm run typecheck && npm run test`.
 10. Match CI locally before opening a PR: `npm run lint && npm run test && npm run build && npm run check:client`.
 
@@ -31,6 +35,8 @@
 
 ## Tailnet setup
 - Configure once via web setup form or CLI `devbox setup tailnet`.
+- OAuth scopes required: `auth_keys` write and `devices:core` write.
+- ACL must allow configured tags in `tagOwners` (default tag: `tag:devbox`).
 - Config is locked while boxes exist (delete all boxes to reconfigure).
 - Check status: `devbox setup status` or `GET /v1/tailnet/config`.
 - Clear config: `devbox setup clear` or `DELETE /v1/tailnet/config`.

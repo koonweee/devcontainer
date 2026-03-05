@@ -55,4 +55,6 @@ These are set automatically by the orchestrator when Tailscale is configured. Th
 - Keep runtime container env entries in `docker/runtime/runtime.env`.
 - Tailscale runtime state path is fixed at `/workspace/.tailscale` inside each box (not user-configurable).
 - Tailnet credentials (OAuth client ID/secret) are stored in the SQLite database, not in env vars. Configure them via the web UI setup form or `devbox setup tailnet` CLI command.
+- Tailscale OAuth client must include `auth_keys` write and `devices:core` write scopes.
+- Tailnet ACL `tagOwners` must allow configured device tags (default `tag:devbox`).
 - For setup steps and operational flows, use `USAGE.md`.
