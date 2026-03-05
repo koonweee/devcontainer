@@ -38,7 +38,7 @@ Supporting abstractions:
 Fastify should call these methods directly and map errors to HTTP responses.
 
 ## 3) Core data model + minimal DB schema
-Use a simple SQL DB (SQLite for local dev; Postgres optional later).
+Use a simple SQL DB (SQLite).
 
 ### Box
 Fields:
@@ -152,7 +152,6 @@ CLI app (`apps/cli`) behavior:
 Use Docker Compose for runtime services:
 - `api` container (has privileged `docker.sock` mount)
 - `web` container (no docker.sock)
-- `db` container
 
 CLI runs locally on host and points to API URL.
 

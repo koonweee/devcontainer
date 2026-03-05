@@ -35,7 +35,7 @@ flowchart LR
 
 ## Deployment boundary
 - API container is privileged and mounts `docker.sock`.
-- API persists orchestrator state in SQLite (`DEVBOX_DB_PATH`, default `/data/devbox.sqlite` in Compose) on a mounted volume.
+- API persists orchestrator state in SQLite (`DEVBOX_DB_PATH`, default `/data/devbox.sqlite` in Compose).
 - Web container is separate and has no Docker socket access.
 - Compose wiring is in [`docker-compose.yml`].
 - Environment variable defaults and recommendations are documented in [`ENV.md`].
