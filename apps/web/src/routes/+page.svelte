@@ -12,6 +12,7 @@
   import * as Card from '$lib/components/ui/card';
   import * as Alert from '$lib/components/ui/alert';
   import * as Dialog from '$lib/components/ui/dialog';
+  import * as Tooltip from '$lib/components/ui/tooltip';
   import { Input } from '$lib/components/ui/input';
   import { Separator } from '$lib/components/ui/separator';
 
@@ -21,40 +22,6 @@
 
   let name = '';
   let confirmRemoveId: string | null = null;
-  let tailnetConfigured = data.tailnetConfigured;
-
-  // Setup form state
-  let setupTailnet = '';
-  let setupClientId = '';
-  let setupClientSecret = '';
-  let setupSaving = false;
-  let setupError = '';
-
-  async function saveTailnetConfig(event: SubmitEvent): Promise<void> {
-    event.preventDefault();
-    setupSaving = true;
-    setupError = '';
-    try {
-      const response = await fetch(`${data.apiUrl}/v1/tailnet/config`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tailnet: setupTailnet,
-          oauthClientId: setupClientId,
-          oauthClientSecret: setupClientSecret
-        })
-      });
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({})) as { message?: string };
-        throw new Error(body.message ?? `Failed (${response.status})`);
-      }
-      tailnetConfigured = true;
-    } catch (err) {
-      setupError = err instanceof Error ? err.message : 'Failed to save';
-    } finally {
-      setupSaving = false;
-    }
-  }
 
   $: activeViewer = $store.activeLogTab ? $store.logViewers[$store.activeLogTab] : null;
 
@@ -115,253 +82,229 @@
   }
 </script>
 
-<!-- Header -->
-<div class="min-h-screen">
-  <header class="sticky top-0 z-10 border-b border-border bg-background/80 backdrop-blur-md">
-    <div class="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
-      <div class="flex items-center gap-3">
-        <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/15">
-          <svg class="h-4 w-4 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="2" y="6" width="20" height="12" rx="2" />
-            <path d="M12 12h.01" />
-            <path d="M17 12h.01" />
-            <path d="M7 12h.01" />
-          </svg>
-        </div>
-        <h1 class="text-base font-semibold tracking-tight">Dev Boxes</h1>
-        {#if $store.boxes.length > 0}
-          <span class="rounded-md bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">{$store.boxes.length}</span>
-        {/if}
-      </div>
+<main class="mx-auto max-w-5xl px-4 py-4">
+  <!-- Sub-header: title + count + create form -->
+  <div class="mb-4 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <h1 class="text-base font-semibold tracking-tight">Dev Boxes</h1>
+      {#if $store.boxes.length > 0}
+        <span class="rounded-md bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">{$store.boxes.length}</span>
+      {/if}
+    </div>
 
-      <form onsubmit={createBox} class="flex items-center gap-2">
-        <Input
-          bind:value={name}
-          minlength={3}
-          maxlength={63}
-          required
-          placeholder="box-name"
-          class="h-8 w-44 bg-muted/50 font-mono text-sm placeholder:text-muted-foreground/50"
-        />
+    <form onsubmit={createBox} class="flex items-center gap-2">
+      <Input
+        bind:value={name}
+        minlength={3}
+        maxlength={63}
+        required
+        placeholder="box-name"
+        disabled={!data.tailnetConfigured}
+        class="h-8 w-44 bg-muted/50 font-mono text-sm placeholder:text-muted-foreground/50"
+      />
+      {#if data.tailnetConfigured}
         <Button type="submit" variant="outline" size="sm" class="h-8 border-primary/40 text-primary hover:bg-primary/10 hover:text-primary">
           Create
         </Button>
-      </form>
-    </div>
-  </header>
-
-  <main class="mx-auto max-w-5xl px-4 py-4">
-    <!-- Setup Gate -->
-    {#if !tailnetConfigured}
-      <Card.Root class="mb-4 border-amber-500/30 bg-amber-500/5">
-        <Card.Header>
-          <Card.Title class="text-sm font-semibold text-amber-400">Tailnet setup required</Card.Title>
-        </Card.Header>
-        <Card.Content>
-          <p class="mb-4 text-sm text-muted-foreground">Configure Tailscale credentials before creating dev boxes. All boxes will be accessible only via your Tailnet.</p>
-          <form onsubmit={saveTailnetConfig} class="space-y-3">
-            <div class="grid gap-3 sm:grid-cols-3">
-              <Input bind:value={setupTailnet} required placeholder="tailnet (e.g. example.com)" class="h-8 bg-muted/50 font-mono text-sm" />
-              <Input bind:value={setupClientId} required placeholder="OAuth client ID" class="h-8 bg-muted/50 font-mono text-sm" />
-              <Input bind:value={setupClientSecret} required placeholder="OAuth client secret" type="password" class="h-8 bg-muted/50 font-mono text-sm" />
-            </div>
-            {#if setupError}
-              <p class="text-xs text-destructive">{setupError}</p>
-            {/if}
-            <Button type="submit" variant="outline" size="sm" class="h-8 border-amber-500/40 text-amber-400 hover:bg-amber-500/10" disabled={setupSaving}>
-              {setupSaving ? 'Saving...' : 'Save configuration'}
-            </Button>
-          </form>
-        </Card.Content>
-      </Card.Root>
-    {:else if $store.boxes.length > 0}
-      <div class="mb-3 flex items-center gap-2 text-xs text-muted-foreground">
-        <div class="h-1.5 w-1.5 rounded-full bg-cyan-400"></div>
-        <span>Tailnet configured &mdash; config locked while boxes exist</span>
-      </div>
-    {/if}
-
-    <!-- Error Alert -->
-    {#if $store.error}
-      <Alert.Root variant="destructive" class="mb-4 border-destructive/30 bg-destructive/10">
-        <Alert.Description class="flex items-center justify-between text-sm">
-          <span>{$store.error}</span>
-          <button
-            class="ml-4 text-xs text-destructive/70 hover:text-destructive"
-            onclick={() => { /* error will clear on next successful action */ }}
-          >
-            Dismiss
-          </button>
-        </Alert.Description>
-      </Alert.Root>
-    {/if}
-
-    <!-- Box List -->
-    {#if $store.boxes.length === 0}
-      <div class="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-16 text-center">
-        <div class="mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-muted">
-          <svg class="h-6 w-6 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="2" y="6" width="20" height="12" rx="2" />
-            <path d="M12 12h.01" />
-          </svg>
-        </div>
-        <p class="text-sm text-muted-foreground">No dev boxes yet</p>
-        <p class="mt-1 text-xs text-muted-foreground/60">Create one using the form above</p>
-      </div>
-    {:else}
-      <div class="space-y-1.5">
-        {#each $store.boxes as box (box.id)}
-          <Card.Root class="border-border bg-card/60 transition-colors hover:bg-card/80">
-            <div class="flex items-center gap-3 px-4 py-2.5">
-              <!-- Status dot -->
-              <div class={cn(
-                'h-2 w-2 shrink-0 rounded-full',
-                box.status === 'running' ? 'bg-cyan-400 shadow-[0_0_6px_theme(--color-primary)]' :
-                box.status === 'error' ? 'bg-red-400' :
-                ['creating', 'starting', 'stopping', 'removing'].includes(box.status) ? 'bg-amber-400 animate-pulse' :
-                'bg-zinc-500'
-              )}></div>
-
-              <!-- Name -->
-              <span class="min-w-0 flex-shrink-0 truncate font-mono text-sm font-medium text-foreground">
-                {box.name}
+      {:else}
+        <Tooltip.Root>
+          <Tooltip.Trigger>
+            {#snippet child({ props })}
+              <span {...props} class="inline-flex h-8 cursor-not-allowed items-center rounded-md border border-primary/40 bg-background px-3 text-sm font-medium text-muted-foreground opacity-50">
+                Create
               </span>
+            {/snippet}
+          </Tooltip.Trigger>
+          <Tooltip.Portal>
+            <Tooltip.Content>
+              Configure Tailscale in <a href="/settings" class="underline">Settings</a> first
+            </Tooltip.Content>
+          </Tooltip.Portal>
+        </Tooltip.Root>
+      {/if}
+    </form>
+  </div>
 
-              <!-- Tailnet URL -->
-              {#if box.tailnetUrl}
-                <span class="min-w-0 truncate font-mono text-xs text-cyan-400/80" title={box.tailnetUrl}>
-                  {box.tailnetUrl}
-                </span>
+  <!-- Error Alert -->
+  {#if $store.error}
+    <Alert.Root variant="destructive" class="mb-4 border-destructive/30 bg-destructive/10">
+      <Alert.Description class="flex items-center justify-between text-sm">
+        <span>{$store.error}</span>
+        <button
+          class="ml-4 text-xs text-destructive/70 hover:text-destructive"
+          onclick={() => { /* error will clear on next successful action */ }}
+        >
+          Dismiss
+        </button>
+      </Alert.Description>
+    </Alert.Root>
+  {/if}
+
+  <!-- Box List -->
+  {#if $store.boxes.length === 0}
+    <div class="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-16 text-center">
+      <div class="mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-muted">
+        <svg class="h-6 w-6 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="6" width="20" height="12" rx="2" />
+          <path d="M12 12h.01" />
+        </svg>
+      </div>
+      <p class="text-sm text-muted-foreground">No dev boxes yet</p>
+      <p class="mt-1 text-xs text-muted-foreground/60">Create one using the form above</p>
+    </div>
+  {:else}
+    <div class="space-y-1.5">
+      {#each $store.boxes as box (box.id)}
+        <Card.Root class="border-border bg-card/60 transition-colors hover:bg-card/80">
+          <div class="flex items-center gap-3 px-4 py-2.5">
+            <!-- Status dot -->
+            <div class={cn(
+              'h-2 w-2 shrink-0 rounded-full',
+              box.status === 'running' ? 'bg-cyan-400 shadow-[0_0_6px_theme(--color-primary)]' :
+              box.status === 'error' ? 'bg-red-400' :
+              ['creating', 'starting', 'stopping', 'removing'].includes(box.status) ? 'bg-amber-400 animate-pulse' :
+              'bg-zinc-500'
+            )}></div>
+
+            <!-- Name -->
+            <span class="min-w-0 flex-shrink-0 truncate font-mono text-sm font-medium text-foreground">
+              {box.name}
+            </span>
+
+            <!-- Tailnet URL -->
+            {#if box.tailnetUrl}
+              <span class="min-w-0 truncate font-mono text-xs text-cyan-400/80" title={box.tailnetUrl}>
+                {box.tailnetUrl}
+              </span>
+            {:else}
+              <!-- Image -->
+              <span class="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground" title={box.image}>
+                {truncateImage(box.image)}
+              </span>
+            {/if}
+
+            <!-- Status Badge -->
+            <Badge variant="outline" class={cn('shrink-0 border px-2 py-0 text-[0.65rem] font-medium uppercase tracking-wider', statusVariant(box.status))}>
+              {box.status}
+            </Badge>
+
+            <!-- Actions -->
+            <div class="flex shrink-0 items-center gap-1">
+              {#if box.status === 'running'}
+                <Button variant="ghost" size="icon-sm" onclick={() => store.stop(box.id)} class="h-7 w-7 text-muted-foreground hover:text-foreground" title="Stop">
+                  <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1" /></svg>
+                </Button>
+              {:else if box.status === 'stopped'}
+                <Button variant="ghost" size="icon-sm" onclick={() => store.start(box.id)} class="h-7 w-7 text-muted-foreground hover:text-primary" title="Start">
+                  <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v14l11-7-11-7z" /></svg>
+                </Button>
               {:else}
-                <!-- Image -->
-                <span class="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground" title={box.image}>
-                  {truncateImage(box.image)}
-                </span>
+                <div class="h-7 w-7"></div>
               {/if}
 
-              <!-- Status Badge -->
-              <Badge variant="outline" class={cn('shrink-0 border px-2 py-0 text-[0.65rem] font-medium uppercase tracking-wider', statusVariant(box.status))}>
-                {box.status}
-              </Badge>
+              <Button variant="ghost" size="icon-sm" onclick={() => store.openLogs(box.id)} class="h-7 w-7 text-muted-foreground hover:text-foreground" title="View logs">
+                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M13 4v16" /><path d="M17 4v16" /><path d="M19 4H9.5a4.5 4.5 0 0 0 0 9H13" />
+                </svg>
+              </Button>
 
-              <!-- Actions -->
-              <div class="flex shrink-0 items-center gap-1">
-                {#if box.status === 'running'}
-                  <Button variant="ghost" size="icon-sm" onclick={() => store.stop(box.id)} class="h-7 w-7 text-muted-foreground hover:text-foreground" title="Stop">
-                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1" /></svg>
-                  </Button>
-                {:else if box.status === 'stopped'}
-                  <Button variant="ghost" size="icon-sm" onclick={() => store.start(box.id)} class="h-7 w-7 text-muted-foreground hover:text-primary" title="Start">
-                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v14l11-7-11-7z" /></svg>
-                  </Button>
-                {:else}
-                  <div class="h-7 w-7"></div>
-                {/if}
-
-                <Button variant="ghost" size="icon-sm" onclick={() => store.openLogs(box.id)} class="h-7 w-7 text-muted-foreground hover:text-foreground" title="View logs">
-                  <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M13 4v16" /><path d="M17 4v16" /><path d="M19 4H9.5a4.5 4.5 0 0 0 0 9H13" />
-                  </svg>
-                </Button>
-
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onclick={() => handleRemove(box.id)}
-                  class="h-7 w-7 text-muted-foreground hover:text-destructive"
-                  title="Remove"
-                  disabled={['creating', 'removing'].includes(box.status)}
-                >
-                  <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
-                  </svg>
-                </Button>
-              </div>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onclick={() => handleRemove(box.id)}
+                class="h-7 w-7 text-muted-foreground hover:text-destructive"
+                title="Remove"
+                disabled={['creating', 'removing'].includes(box.status)}
+              >
+                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                </svg>
+              </Button>
             </div>
-          </Card.Root>
+          </div>
+        </Card.Root>
+      {/each}
+    </div>
+  {/if}
+
+  <!-- Log Viewer -->
+  {#if $store.openLogTabs.length > 0}
+    <Separator class="my-4 bg-border" />
+
+    <Card.Root class="overflow-hidden border-border bg-card/60">
+      <!-- Tab bar -->
+      <div class="flex items-center gap-0.5 overflow-x-auto border-b border-border bg-muted/30 px-2 pt-1.5">
+        {#each $store.openLogTabs as tabId (tabId)}
+          <div class={cn(
+            'group relative flex items-center rounded-t-md text-xs font-medium transition-colors',
+            $store.activeLogTab === tabId
+              ? 'bg-card text-foreground'
+              : 'text-muted-foreground hover:text-foreground/80'
+          )}>
+            {#if $store.activeLogTab === tabId}
+              <div class="absolute inset-x-0 bottom-0 h-px bg-primary"></div>
+            {/if}
+            <button
+              class="px-3 py-1.5 font-mono"
+              onclick={() => store.setActiveLogTab(tabId)}
+              type="button"
+            >
+              {boxLabel(tabId)}
+            </button>
+            <button
+              class="mr-1 rounded p-0.5 text-muted-foreground/50 hover:bg-muted hover:text-foreground"
+              onclick={() => store.closeLogs(tabId)}
+              type="button"
+              title="Close tab"
+            >
+              <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+            </button>
+          </div>
         {/each}
       </div>
-    {/if}
 
-    <!-- Log Viewer -->
-    {#if $store.openLogTabs.length > 0}
-      <Separator class="my-4 bg-border" />
+      <!-- Log controls + terminal -->
+      {#if activeViewer}
+        <div class="flex items-center gap-3 border-b border-border px-3 py-1.5">
+          <label class="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={activeViewer.follow}
+              onchange={(event) =>
+                store.setLogFollow(activeViewer.boxId, (event.currentTarget as HTMLInputElement).checked)}
+              class="accent-primary"
+            />
+            Follow
+          </label>
+          <Button variant="ghost" size="sm" onclick={() => store.clearLogs(activeViewer.boxId)} class="h-6 px-2 text-xs text-muted-foreground hover:text-foreground">
+            Clear
+          </Button>
 
-      <Card.Root class="overflow-hidden border-border bg-card/60">
-        <!-- Tab bar -->
-        <div class="flex items-center gap-0.5 overflow-x-auto border-b border-border bg-muted/30 px-2 pt-1.5">
-          {#each $store.openLogTabs as tabId (tabId)}
+          <div class="flex-1"></div>
+
+          <div class="flex items-center gap-1.5">
             <div class={cn(
-              'group relative flex items-center rounded-t-md text-xs font-medium transition-colors',
-              $store.activeLogTab === tabId
-                ? 'bg-card text-foreground'
-                : 'text-muted-foreground hover:text-foreground/80'
-            )}>
-              {#if $store.activeLogTab === tabId}
-                <div class="absolute inset-x-0 bottom-0 h-px bg-primary"></div>
-              {/if}
-              <button
-                class="px-3 py-1.5 font-mono"
-                onclick={() => store.setActiveLogTab(tabId)}
-                type="button"
-              >
-                {boxLabel(tabId)}
-              </button>
-              <button
-                class="mr-1 rounded p-0.5 text-muted-foreground/50 hover:bg-muted hover:text-foreground"
-                onclick={() => store.closeLogs(tabId)}
-                type="button"
-                title="Close tab"
-              >
-                <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
-              </button>
-            </div>
-          {/each}
+              'h-1.5 w-1.5 rounded-full',
+              activeViewer.status === 'streaming' ? 'bg-cyan-400 animate-pulse' :
+              activeViewer.status === 'connecting' ? 'bg-amber-400 animate-pulse' :
+              activeViewer.status === 'error' ? 'bg-red-400' :
+              'bg-zinc-500'
+            )}></div>
+            <span class="font-mono text-[0.65rem] uppercase tracking-wider text-muted-foreground">{activeViewer.status}</span>
+          </div>
+
+          {#if activeViewer.error}
+            <span class="text-xs text-destructive">{activeViewer.error}</span>
+          {/if}
         </div>
 
-        <!-- Log controls + terminal -->
-        {#if activeViewer}
-          <div class="flex items-center gap-3 border-b border-border px-3 py-1.5">
-            <label class="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
-              <input
-                type="checkbox"
-                checked={activeViewer.follow}
-                onchange={(event) =>
-                  store.setLogFollow(activeViewer.boxId, (event.currentTarget as HTMLInputElement).checked)}
-                class="accent-primary"
-              />
-              Follow
-            </label>
-            <Button variant="ghost" size="sm" onclick={() => store.clearLogs(activeViewer.boxId)} class="h-6 px-2 text-xs text-muted-foreground hover:text-foreground">
-              Clear
-            </Button>
-
-            <div class="flex-1"></div>
-
-            <div class="flex items-center gap-1.5">
-              <div class={cn(
-                'h-1.5 w-1.5 rounded-full',
-                activeViewer.status === 'streaming' ? 'bg-cyan-400 animate-pulse' :
-                activeViewer.status === 'connecting' ? 'bg-amber-400 animate-pulse' :
-                activeViewer.status === 'error' ? 'bg-red-400' :
-                'bg-zinc-500'
-              )}></div>
-              <span class="font-mono text-[0.65rem] uppercase tracking-wider text-muted-foreground">{activeViewer.status}</span>
-            </div>
-
-            {#if activeViewer.error}
-              <span class="text-xs text-destructive">{activeViewer.error}</span>
-            {/if}
-          </div>
-
-          <div class="p-2">
-            <LogTerminal lines={activeViewer.lines} />
-          </div>
-        {/if}
-      </Card.Root>
-    {/if}
-  </main>
-</div>
+        <div class="p-2">
+          <LogTerminal lines={activeViewer.lines} />
+        </div>
+      {/if}
+    </Card.Root>
+  {/if}
+</main>
 
 <!-- Remove confirmation dialog -->
 <Dialog.Root open={confirmRemoveId !== null} onOpenChange={(open) => { if (!open) confirmRemoveId = null; }}>

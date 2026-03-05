@@ -113,7 +113,7 @@ export function buildCliProgram(client: CliApiClient): Command {
 
   setup
     .command('tailnet')
-    .description('Configure Tailscale credentials')
+    .description('Configure Tailscale credentials (https://tailscale.com/kb/1215/oauth-clients)')
     .requiredOption('--tailnet <tailnet>', 'Tailscale tailnet name')
     .requiredOption('--client-id <id>', 'OAuth client ID')
     .requiredOption('--client-secret <secret>', 'OAuth client secret')
@@ -130,15 +130,23 @@ export function buildCliProgram(client: CliApiClient): Command {
       hostnamePrefix: string;
       authkeyExpiry?: number;
     }) => {
-      const config = await client.setTailnetConfig({
-        tailnet: options.tailnet,
-        oauthClientId: options.clientId,
-        oauthClientSecret: options.clientSecret,
-        tagsCsv: options.tags,
-        hostnamePrefix: options.hostnamePrefix,
-        authkeyExpirySeconds: options.authkeyExpiry
-      });
-      console.log(`Tailnet configured: ${config.tailnet} (prefix: ${config.hostnamePrefix})`);
+      try {
+        const config = await client.setTailnetConfig({
+          tailnet: options.tailnet,
+          oauthClientId: options.clientId,
+          oauthClientSecret: options.clientSecret,
+          tagsCsv: options.tags,
+          hostnamePrefix: options.hostnamePrefix,
+          authkeyExpirySeconds: options.authkeyExpiry
+        });
+        console.log(`Tailnet configured: ${config.tailnet} (prefix: ${config.hostnamePrefix})`);
+      } catch (err) {
+        if (err instanceof Error && err.message.includes('Cannot modify tailnet config while boxes exist')) {
+          console.error('Error: Cannot modify tailnet config while boxes exist. Remove all boxes first.');
+          process.exit(1);
+        }
+        throw err;
+      }
     });
 
   setup
@@ -161,8 +169,16 @@ export function buildCliProgram(client: CliApiClient): Command {
     .command('clear')
     .description('Clear tailnet configuration')
     .action(async () => {
-      await client.deleteTailnetConfig();
-      console.log('Tailnet configuration cleared');
+      try {
+        await client.deleteTailnetConfig();
+        console.log('Tailnet configuration cleared');
+      } catch (err) {
+        if (err instanceof Error && err.message.includes('Cannot modify tailnet config while boxes exist')) {
+          console.error('Error: Cannot modify tailnet config while boxes exist. Remove all boxes first.');
+          process.exit(1);
+        }
+        throw err;
+      }
     });
 
   return program;

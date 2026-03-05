@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { Box, BoxLogsEvent, Job } from '@devbox/api-client';
+import type { Box, BoxLogsEvent, Job, TailnetConfig } from '@devbox/api-client';
 
 import { buildCliProgram, parsePositiveIntegerOption, type CliApiClient } from '../src/cli.js';
 
@@ -67,6 +67,33 @@ function buildClient(overrides: Partial<CliApiClient> = {}): CliApiClient {
       }
       return logs();
     },
+    async getTailnetConfig(): Promise<TailnetConfig> {
+      return {
+        tailnet: 'example.com',
+        oauthClientId: 'client-id',
+        oauthClientSecret: '****',
+        tagsCsv: 'tag:devbox',
+        hostnamePrefix: 'devbox',
+        authkeyExpirySeconds: 86400,
+        createdAt: new Date('2026-01-01T00:00:00.000Z').toISOString(),
+        updatedAt: new Date('2026-01-01T00:00:00.000Z').toISOString()
+      };
+    },
+    async setTailnetConfig(): Promise<TailnetConfig> {
+      return {
+        tailnet: 'example.com',
+        oauthClientId: 'client-id',
+        oauthClientSecret: '****',
+        tagsCsv: 'tag:devbox',
+        hostnamePrefix: 'devbox',
+        authkeyExpirySeconds: 86400,
+        createdAt: new Date('2026-01-01T00:00:00.000Z').toISOString(),
+        updatedAt: new Date('2026-01-01T00:00:00.000Z').toISOString()
+      };
+    },
+    async deleteTailnetConfig(): Promise<void> {
+      // no-op
+    },
     ...overrides
   };
 }
@@ -119,5 +146,61 @@ describe('CLI logs command', () => {
     expect(() => parsePositiveIntegerOption('--tail', '1e2')).toThrow(
       '--tail must be a positive integer'
     );
+  });
+});
+
+describe('CLI setup lock messaging', () => {
+  it('prints friendly lock error for setup tailnet when boxes exist', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    const client = buildClient({
+      async setTailnetConfig() {
+        throw new Error('API error 409: Cannot modify tailnet config while boxes exist');
+      }
+    });
+    const program = buildCliProgram(client);
+
+    // process.exit is mocked so the throw after it will propagate
+    await program.parseAsync([
+      'node', 'devbox', 'setup', 'tailnet',
+      '--tailnet', 'example.com',
+      '--client-id', 'id',
+      '--client-secret', 'secret'
+    ]).catch(() => {/* expected re-throw */});
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      'Error: Cannot modify tailnet config while boxes exist. Remove all boxes first.'
+    );
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    exitSpy.mockRestore();
+    errorSpy.mockRestore();
+    logSpy.mockRestore();
+  });
+
+  it('prints friendly lock error for setup clear when boxes exist', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    const client = buildClient({
+      async deleteTailnetConfig() {
+        throw new Error('API error 409: Cannot modify tailnet config while boxes exist');
+      }
+    });
+    const program = buildCliProgram(client);
+
+    await program.parseAsync(['node', 'devbox', 'setup', 'clear']).catch(() => {/* expected re-throw */});
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      'Error: Cannot modify tailnet config while boxes exist. Remove all boxes first.'
+    );
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    exitSpy.mockRestore();
+    errorSpy.mockRestore();
+    logSpy.mockRestore();
   });
 });
