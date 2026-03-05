@@ -12,6 +12,7 @@ This repo builds a Docker-image-based dev box platform. Keep implementations sim
 ## Required repo docs maintenance
 - Always update root `USAGE.md` when working on this repo.
   - `USAGE.md` must contain exactly 2 sections: **Setting up** and **User flows**.
+  - `Setting up` must be split into: **For development** and **For deployment**.
   - Keep both sections brief and instruction-focused (no deep implementation detail).
 - Always update root `ARCHITECTURE.md` when working on this repo.
   - Keep it brief; describe structure and link to code where helpful.

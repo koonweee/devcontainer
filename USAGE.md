@@ -1,11 +1,18 @@
 ## Setting up
+### For development
 1. Install Node.js 22+ and Docker.
-2. Install workspace dependencies: `npm install`.
-3. Review environment variables (defaults are zero-config): `ENV.md` and `.env.example`.
-4. Generate contract artifacts (OpenAPI + typed client): `npm run gen:client`.
-5. Start API + web + db with Compose: `docker compose up --build`.
-6. For local non-container dev, run `npm run -w @devbox/api dev` and `npm run -w @devbox/web dev` (API uses Docker Engine via `dockerode` over `docker.sock`).
-7. Run quick verification after changes: `npm run typecheck && npm run test`.
+2. Install dependencies: `npm install`.
+3. Review env defaults: `ENV.md` and `.env.example`.
+4. Generate contracts: `npm run gen:client`.
+5. Start stack: `docker compose up --build`.
+6. Optional local app-only runs: `npm run -w @devbox/api dev` and `npm run -w @devbox/web dev`.
+7. Verify changes: `npm run typecheck && npm run test`.
+
+### For deployment
+1. Configure runtime values in `ENV.md` (usually `DEVBOX_PUBLIC_API_URL`, `DEVBOX_INTERNAL_API_URL`, `DEVBOX_API_URL`, `DEVBOX_DB_PATH`).
+2. Build and start services with your target orchestrator or Compose profile.
+3. Ensure API container can access `/var/run/docker.sock`; do not grant that mount to web/CLI.
+4. Run post-deploy checks: `npm run gen:client`, `npm run typecheck`, and API health checks.
 
 ## User flows
 1. Create a box from the API (`POST /v1/boxes`), web form, or CLI: `npm run -w @devbox/cli start -- create -n my-box`.
