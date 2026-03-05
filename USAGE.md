@@ -1,7 +1,7 @@
 ## Setting up
 1. Install Node.js 22+ and Docker.
 2. Install workspace dependencies: `npm install`.
-3. Generate contract artifacts: `npm run gen:client`.
+3. Generate contract artifacts (OpenAPI + typed client): `npm run gen:client`.
 4. Start API + web + db with Compose: `docker compose up --build`.
 5. For local non-container dev, run `npm run -w @devbox/api dev` and `npm run -w @devbox/web dev` (API uses Docker Engine via `dockerode` over `docker.sock`).
 

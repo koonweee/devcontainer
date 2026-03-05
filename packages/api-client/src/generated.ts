@@ -352,7 +352,6 @@ export interface components {
             id: string;
             name: string;
             image: string;
-            /** @enum {string} */
             status: "creating" | "running" | "stopping" | "stopped" | "removing" | "error";
             containerId: string | null;
             networkName: string;
@@ -365,9 +364,7 @@ export interface components {
         /** Job */
         "def-1": {
             id: string;
-            /** @enum {string} */
             type: "create" | "stop" | "remove" | "sync" | "cleanup";
-            /** @enum {string} */
             status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
             boxId: string | null;
             progress: number;

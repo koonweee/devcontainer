@@ -14,6 +14,8 @@
   "dependencies": {
     "@devbox/orchestrator": "0.1.0",
     "@fastify/swagger": "^9.5.2",
+    "@fastify/type-provider-typebox": "^6.1.0",
+    "@sinclair/typebox": "^0.34.48",
     "fastify": "^5.2.0"
   }
 }

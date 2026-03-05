@@ -1,6 +1,8 @@
 import Fastify from 'fastify';
-import type { FastifyError, FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import swagger from '@fastify/swagger';
+import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
+import { Type } from '@sinclair/typebox';
 import {
   InMemoryBoxRepository
 } from '@devbox/orchestrator/in-memory-repositories';
@@ -12,19 +14,27 @@ import { DevboxOrchestrator as OrchestratorClass } from '@devbox/orchestrator/or
 import { NotFoundError, SecurityError, ValidationError } from '@devbox/orchestrator/errors';
 import { OrchestratorEvents } from '@devbox/orchestrator/events';
 
-import { BoxSchema, CreateBoxBodySchema, JobSchema } from './schemas.js';
+import {
+  BoxIdParamsSchema,
+  BoxLogsQuerySchema,
+  BoxSchema,
+  CreateBoxBodySchema,
+  CreateBoxResponseSchema,
+  JobIdParamsSchema,
+  JobSchema
+} from './schemas.js';
 
 interface BuildAppOptions {
   orchestrator?: DevboxOrchestrator;
   heartbeatMs?: number;
 }
 
-function writeSseEvent(reply: { raw: { write: (chunk: string) => void } }, event: string, payload: unknown): void {
+function writeSseEvent(reply: FastifyReply, event: string, payload: unknown): void {
   reply.raw.write(`event: ${event}\n`);
   reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
-function attachErrorMapping(app: ReturnType<typeof Fastify>): void {
+function attachErrorMapping(app: FastifyInstance): void {
   app.setErrorHandler((error: FastifyError, _request: FastifyRequest, reply: FastifyReply) => {
     if (error instanceof ValidationError) {
       reply.status(400).send({ message: error.message });
@@ -55,7 +65,7 @@ export function buildInMemoryOrchestrator(): DevboxOrchestrator {
 }
 
 export async function buildApp(options?: BuildAppOptions) {
-  const app = Fastify({ logger: false });
+  const app = Fastify({ logger: false }).withTypeProvider<TypeBoxTypeProvider>();
   let orchestrator = options?.orchestrator;
   if (!orchestrator) {
     const { createOrchestrator } = await import('@devbox/orchestrator/factory');
@@ -79,166 +89,132 @@ export async function buildApp(options?: BuildAppOptions) {
 
   app.get('/openapi.json', async () => app.swagger());
 
-  app.post('/v1/boxes', {
-    schema: {
-      body: CreateBoxBodySchema,
-      response: {
-        200: {
-          type: 'object',
-          required: ['box', 'job'],
-          properties: {
-            box: { $ref: 'Box#' },
-            job: { $ref: 'Job#' }
-          }
+  app.post(
+    '/v1/boxes',
+    {
+      schema: {
+        body: CreateBoxBodySchema,
+        response: {
+          200: CreateBoxResponseSchema
         }
       }
-    }
-  }, async (request) => {
-    const body = request.body as {
-      name: string;
-      image: string;
-      command?: string[];
-      env?: Record<string, string>;
-    };
+    },
+    async (request) => orchestrator.createBox(request.body)
+  );
 
-    return orchestrator.createBox({
-      name: body.name,
-      image: body.image,
-      command: body.command,
-      env: body.env
-    });
-  });
-
-  app.get('/v1/boxes', {
-    schema: {
-      response: {
-        200: {
-          type: 'array',
-          items: { $ref: 'Box#' }
+  app.get(
+    '/v1/boxes',
+    {
+      schema: {
+        response: {
+          200: Type.Array(Type.Ref(BoxSchema))
         }
       }
-    }
-  }, async () => orchestrator.listBoxes());
+    },
+    async () => orchestrator.listBoxes()
+  );
 
-  app.get('/v1/boxes/:boxId', {
-    schema: {
-      params: {
-        type: 'object',
-        required: ['boxId'],
-        properties: {
-          boxId: { type: 'string' }
-        }
-      },
-      response: {
-        200: { $ref: 'Box#' }
-      }
-    }
-  }, async (request) => {
-    const box = await orchestrator.getBox((request.params as { boxId: string }).boxId);
-    if (!box) {
-      throw new NotFoundError('Box not found');
-    }
-    return box;
-  });
-
-  app.post('/v1/boxes/:boxId/stop', {
-    schema: {
-      params: {
-        type: 'object',
-        required: ['boxId'],
-        properties: {
-          boxId: { type: 'string' }
-        }
-      },
-      response: {
-        200: { $ref: 'Job#' }
-      }
-    }
-  }, async (request) => orchestrator.stopBox((request.params as { boxId: string }).boxId));
-
-  app.delete('/v1/boxes/:boxId', {
-    schema: {
-      params: {
-        type: 'object',
-        required: ['boxId'],
-        properties: {
-          boxId: { type: 'string' }
-        }
-      },
-      response: {
-        200: { $ref: 'Job#' }
-      }
-    }
-  }, async (request) => orchestrator.removeBox((request.params as { boxId: string }).boxId));
-
-  app.get('/v1/boxes/:boxId/logs', {
-    schema: {
-      params: {
-        type: 'object',
-        required: ['boxId'],
-        properties: {
-          boxId: { type: 'string' }
-        }
-      },
-      querystring: {
-        type: 'object',
-        properties: {
-          follow: { type: 'boolean' },
-          since: { type: 'string' }
+  app.get(
+    '/v1/boxes/:boxId',
+    {
+      schema: {
+        params: BoxIdParamsSchema,
+        response: {
+          200: Type.Ref(BoxSchema)
         }
       }
+    },
+    async (request) => {
+      const box = await orchestrator.getBox(request.params.boxId);
+      if (!box) {
+        throw new NotFoundError('Box not found');
+      }
+      return box;
     }
-  }, async (request, reply) => {
-    const { boxId } = request.params as { boxId: string };
-    const query = request.query as { follow?: boolean; since?: string };
+  );
 
-    reply.hijack();
-    reply.raw.setHeader('Content-Type', 'text/event-stream');
-    reply.raw.setHeader('Cache-Control', 'no-cache');
-    reply.raw.setHeader('Connection', 'keep-alive');
-
-    for await (const log of orchestrator.streamBoxLogs(boxId, {
-      follow: query.follow,
-      since: query.since
-    })) {
-      writeSseEvent(reply, 'box.logs', log);
-    }
-
-    reply.raw.end();
-    return reply;
-  });
-
-  app.get('/v1/jobs', {
-    schema: {
-      response: {
-        200: {
-          type: 'array',
-          items: { $ref: 'Job#' }
+  app.post(
+    '/v1/boxes/:boxId/stop',
+    {
+      schema: {
+        params: BoxIdParamsSchema,
+        response: {
+          200: Type.Ref(JobSchema)
         }
       }
-    }
-  }, async () => orchestrator.listJobs());
+    },
+    async (request) => orchestrator.stopBox(request.params.boxId)
+  );
 
-  app.get('/v1/jobs/:jobId', {
-    schema: {
-      params: {
-        type: 'object',
-        required: ['jobId'],
-        properties: {
-          jobId: { type: 'string' }
+  app.delete(
+    '/v1/boxes/:boxId',
+    {
+      schema: {
+        params: BoxIdParamsSchema,
+        response: {
+          200: Type.Ref(JobSchema)
         }
-      },
-      response: {
-        200: { $ref: 'Job#' }
       }
+    },
+    async (request) => orchestrator.removeBox(request.params.boxId)
+  );
+
+  app.get(
+    '/v1/boxes/:boxId/logs',
+    {
+      schema: {
+        params: BoxIdParamsSchema,
+        querystring: BoxLogsQuerySchema
+      }
+    },
+    async (request, reply) => {
+      reply.hijack();
+      reply.raw.setHeader('Content-Type', 'text/event-stream');
+      reply.raw.setHeader('Cache-Control', 'no-cache');
+      reply.raw.setHeader('Connection', 'keep-alive');
+
+      for await (const log of orchestrator.streamBoxLogs(request.params.boxId, {
+        follow: request.query.follow,
+        since: request.query.since
+      })) {
+        writeSseEvent(reply, 'box.logs', log);
+      }
+
+      reply.raw.end();
+      return reply;
     }
-  }, async (request) => {
-    const job = await orchestrator.getJob((request.params as { jobId: string }).jobId);
-    if (!job) {
-      throw new NotFoundError('Job not found');
+  );
+
+  app.get(
+    '/v1/jobs',
+    {
+      schema: {
+        response: {
+          200: Type.Array(Type.Ref(JobSchema))
+        }
+      }
+    },
+    async () => orchestrator.listJobs()
+  );
+
+  app.get(
+    '/v1/jobs/:jobId',
+    {
+      schema: {
+        params: JobIdParamsSchema,
+        response: {
+          200: Type.Ref(JobSchema)
+        }
+      }
+    },
+    async (request) => {
+      const job = await orchestrator.getJob(request.params.jobId);
+      if (!job) {
+        throw new NotFoundError('Job not found');
+      }
+      return job;
     }
-    return job;
-  });
+  );
 
   app.get('/v1/events', async (_request, reply) => {
     reply.hijack();

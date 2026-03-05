@@ -32,14 +32,43 @@
             "type": "string"
           },
           "status": {
-            "type": "string",
-            "enum": [
-              "creating",
-              "running",
-              "stopping",
-              "stopped",
-              "removing",
-              "error"
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "creating"
+                ]
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "running"
+                ]
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "stopping"
+                ]
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "stopped"
+                ]
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "removing"
+                ]
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
             ]
           },
           "containerId": {
@@ -106,23 +135,71 @@
             "type": "string"
           },
           "type": {
-            "type": "string",
-            "enum": [
-              "create",
-              "stop",
-              "remove",
-              "sync",
-              "cleanup"
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "create"
+                ]
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "stop"
+                ]
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "remove"
+                ]
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "sync"
+                ]
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "cleanup"
+                ]
+              }
             ]
           },
           "status": {
-            "type": "string",
-            "enum": [
-              "queued",
-              "running",
-              "succeeded",
-              "failed",
-              "cancelled"
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "queued"
+                ]
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "running"
+                ]
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "succeeded"
+                ]
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "failed"
+                ]
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "cancelled"
+                ]
+              }
             ]
           },
           "boxId": {
@@ -196,12 +273,12 @@
           "content": {
             "application/json": {
               "schema": {
+                "additionalProperties": false,
                 "type": "object",
                 "required": [
                   "name",
                   "image"
                 ],
-                "additionalProperties": false,
                 "properties": {
                   "name": {
                     "type": "string"
