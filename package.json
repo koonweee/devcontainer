@@ -8,6 +8,10 @@
     "packages/*"
   ],
   "scripts": {
+    "dev": "concurrently \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "npm run -w @devbox/api dev",
+    "dev:web": "npm run -w @devbox/web dev",
+    "dev:cli": "npm run -w @devbox/cli dev",
     "build": "npm run -ws build",
     "build:runtime-image": "./scripts/build-runtime-image.sh",
     "typecheck": "npm run -ws typecheck",
@@ -18,6 +22,7 @@
     "check:client": "npm run gen:client && git diff --exit-code -- apps/api/openapi/openapi.json packages/api-client/src/generated.ts"
   },
   "devDependencies": {
+    "concurrently": "^9.1.2",
     "@types/node": "^22.15.18",
     "@typescript-eslint/types": "^8.56.1",
     "tsx": "^4.19.4",

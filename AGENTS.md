@@ -82,6 +82,13 @@ This repo builds a Docker-image-based dev box platform. Keep implementations sim
   - optional minimal integration smoke tests
 - CI should run lint, typecheck, tests, and client generation checks.
 
+## Development workflow
+- Use `npm run dev` to start API and web with hot reload.
+- Use `npm run dev:api`, `npm run dev:web`, or `npm run dev:cli` to run individual services.
+- Dev ports: API on 3000, Web on 5173 (Vite dev server).
+- API uses `tsx watch` for automatic restart on changes.
+- Web uses Vite HMR for instant updates.
+
 ## Maintainability
 - Minimize user configuration surface; prefer zero-config defaults unless an env variable provides clear operational value.
 - Add brief JSDoc to each class describing intent; keep class JSDoc to 20 words or fewer.

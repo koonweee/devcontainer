@@ -72,7 +72,7 @@ export async function buildApp(options?: BuildAppOptions) {
   }
   await orchestrator.startRuntimeStatusMonitor();
   const heartbeatMs = options?.heartbeatMs ?? 15_000;
-  const corsOrigin = options?.corsOrigin ?? process.env.DEVBOX_WEB_ORIGIN ?? 'http://localhost:4173';
+  const corsOrigin = options?.corsOrigin ?? process.env.DEVBOX_WEB_ORIGIN ?? 'http://localhost:5173';
 
   app.addHook('onRequest', async (request, reply) => {
     reply.header('Access-Control-Allow-Origin', corsOrigin);
