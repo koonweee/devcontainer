@@ -4,6 +4,7 @@
     "allowJs": true,
     "checkJs": false,
     "module": "ESNext",
-    "moduleResolution": "bundler"
+    "moduleResolution": "bundler",
+    "skipLibCheck": true
   }
 }

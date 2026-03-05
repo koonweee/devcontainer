@@ -94,6 +94,16 @@ This repo builds a Docker-image-based dev box platform. Keep implementations sim
 - For user-facing behavior changes, include a Playwright scenario that confirms the behavior in the rendered UI, not only API/network responses.
 - Prefer assertions that cover both system signal correctness (event/response) and end-user-visible result.
 
+## UI conventions (SvelteKit web app)
+- Use Tailwind CSS v4 utility classes; no scoped `<style>` blocks.
+- Use shadcn-svelte components from `$lib/components/ui/*`; no other UI libraries.
+- Import via barrel exports: `import { Button } from '$lib/components/ui/button'`.
+- Use `cn()` from `$lib/utils` for conditional classes.
+- Theme colors defined in `src/app.css` `@theme`; no hardcoded hex in components.
+- Dark theme by default; all colors use semantic tokens (background, foreground, primary, muted, etc.).
+- Add new shadcn components via `npx shadcn-svelte@latest add <name>` from `apps/web/`.
+- Use the `frontend-design` skill for new UI work.
+
 ## Plan quality requirements
 - Every plan must include a short **"Functional changes after implementation"** section that states user-visible behavior changes.
 - Every plan must include **high-ROI tests** (small number, high confidence) tied to the most critical risks and core user flows.
