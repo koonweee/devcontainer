@@ -19,6 +19,7 @@ import {
 interface BuildAppOptions {
   orchestrator?: DevboxOrchestrator;
   heartbeatMs?: number;
+  corsOrigin?: string;
 }
 
 function writeSseEvent(reply: FastifyReply, event: string, payload: unknown): void {
@@ -55,6 +56,18 @@ export async function buildApp(options?: BuildAppOptions) {
     orchestrator = createOrchestrator();
   }
   const heartbeatMs = options?.heartbeatMs ?? 15_000;
+  const corsOrigin = options?.corsOrigin ?? process.env.DEVBOX_WEB_ORIGIN ?? 'http://localhost:4173';
+
+  app.addHook('onRequest', async (request, reply) => {
+    reply.header('Access-Control-Allow-Origin', corsOrigin);
+    reply.header('Vary', 'Origin');
+    reply.header('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
+    reply.header('Access-Control-Allow-Headers', 'Content-Type,Accept,Authorization');
+
+    if (request.method === 'OPTIONS') {
+      await reply.status(204).send();
+    }
+  });
 
   await app.register(swagger, {
     openapi: {
@@ -157,6 +170,8 @@ export async function buildApp(options?: BuildAppOptions) {
       });
 
       reply.hijack();
+      reply.raw.setHeader('Access-Control-Allow-Origin', corsOrigin);
+      reply.raw.setHeader('Vary', 'Origin');
       reply.raw.setHeader('Content-Type', 'text/event-stream');
       reply.raw.setHeader('Cache-Control', 'no-cache');
       reply.raw.setHeader('Connection', 'keep-alive');
@@ -203,6 +218,8 @@ export async function buildApp(options?: BuildAppOptions) {
 
   app.get('/v1/events', async (_request, reply) => {
     reply.hijack();
+    reply.raw.setHeader('Access-Control-Allow-Origin', corsOrigin);
+    reply.raw.setHeader('Vary', 'Origin');
     reply.raw.setHeader('Content-Type', 'text/event-stream');
     reply.raw.setHeader('Cache-Control', 'no-cache');
     reply.raw.setHeader('Connection', 'keep-alive');

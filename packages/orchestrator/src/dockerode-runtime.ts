@@ -69,6 +69,8 @@ export class DockerodeRuntime implements DockerRuntime {
   }
 
   async createContainer(options: CreateContainerOptions): Promise<string> {
+    await this.ensureImage(options.image);
+
     const container = await this.docker.createContainer({
       name: options.name,
       Image: options.image,
@@ -87,6 +89,29 @@ export class DockerodeRuntime implements DockerRuntime {
       }
     });
     return container.id;
+  }
+
+  private async ensureImage(image: string): Promise<void> {
+    try {
+      await this.docker.getImage(image).inspect();
+      return;
+    } catch (error) {
+      const statusCode = (error as { statusCode?: number }).statusCode;
+      if (statusCode !== 404) {
+        throw error;
+      }
+    }
+
+    const pullStream = await this.docker.pull(image);
+    await new Promise<void>((resolve, reject) => {
+      this.docker.modem.followProgress(pullStream, (error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
   }
 
   async startContainer(containerId: string): Promise<void> {
