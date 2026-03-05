@@ -41,7 +41,7 @@ describe('API routes', () => {
     await app.close();
   });
 
-  it('supports create/stop/remove and job status endpoints', async () => {
+  it('supports create/start/stop/remove and job status endpoints', async () => {
     const app = await buildApp({ orchestrator: buildInMemoryOrchestrator(), heartbeatMs: 50 });
 
     const createRes = await app.inject({
@@ -64,6 +64,11 @@ describe('API routes', () => {
     const stopJob = stopRes.json() as { id: string };
     await waitForTerminalJob(app, stopJob.id);
 
+    const startRes = await app.inject({ method: 'POST', url: `/v1/boxes/${created.box.id}/start` });
+    expect(startRes.statusCode).toBe(200);
+    const startJob = startRes.json() as { id: string };
+    await waitForTerminalJob(app, startJob.id);
+
     const removeRes = await app.inject({ method: 'DELETE', url: `/v1/boxes/${created.box.id}` });
     expect(removeRes.statusCode).toBe(200);
     const removeJob = removeRes.json() as { id: string };
@@ -74,8 +79,29 @@ describe('API routes', () => {
 
     const jobsRes = await app.inject({ method: 'GET', url: '/v1/jobs' });
     expect(jobsRes.statusCode).toBe(200);
-    expect((jobsRes.json() as unknown[]).length).toBeGreaterThanOrEqual(3);
+    expect((jobsRes.json() as unknown[]).length).toBeGreaterThanOrEqual(4);
 
+    await app.close();
+  });
+
+  it('returns 400 when starting a box that is not stopped', async () => {
+    const app = await buildApp({ orchestrator: buildInMemoryOrchestrator() });
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/v1/boxes',
+      payload: {
+        name: 'start-invalid-box'
+      }
+    });
+    expect(createRes.statusCode).toBe(200);
+
+    const created = createRes.json() as { box: { id: string }; job: { id: string } };
+    await waitForTerminalJob(app, created.job.id);
+
+    const startRes = await app.inject({ method: 'POST', url: `/v1/boxes/${created.box.id}/start` });
+    expect(startRes.statusCode).toBe(400);
+    expect((startRes.json() as { message: string }).message).toContain('Only stopped boxes');
     await app.close();
   });
 
@@ -300,6 +326,64 @@ describe('API routes', () => {
 
     expect(payload).toContain('event: box.removed');
     expect(payload).toContain(`"boxId":"${created.box.id}"`);
+
+    reader.cancel().catch(() => undefined);
+    await app.close();
+  });
+
+  it('emits starting and running box.updated events over SSE for start jobs', async () => {
+    const app = await buildApp({ orchestrator: buildInMemoryOrchestrator(), heartbeatMs: 50 });
+    const address = await app.listen({ host: '127.0.0.1', port: 0 });
+
+    const createRes = await fetch(`${address}/v1/boxes`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({ name: 'sse-start-box' })
+    });
+    const created = (await createRes.json()) as { box: { id: string }; job: { id: string } };
+    await waitForTerminalJob(app, created.job.id);
+
+    const stopRes = await fetch(`${address}/v1/boxes/${created.box.id}/stop`, {
+      method: 'POST'
+    });
+    const stopJob = (await stopRes.json()) as { id: string };
+    await waitForTerminalJob(app, stopJob.id);
+
+    const response = await fetch(`${address}/v1/events`);
+    if (!response.body) {
+      throw new Error('Expected SSE response body');
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+
+    const startRes = await fetch(`${address}/v1/boxes/${created.box.id}/start`, {
+      method: 'POST'
+    });
+    const startJob = (await startRes.json()) as { id: string };
+    await waitForTerminalJob(app, startJob.id);
+
+    let payload = '';
+    const deadline = Date.now() + 3_000;
+    while (Date.now() < deadline) {
+      const read = await Promise.race([
+        reader.read(),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timed out reading start SSE')), 500))
+      ]);
+
+      payload += decoder.decode(read.value ?? new Uint8Array(), { stream: true });
+      if (payload.includes('"status":"starting"') && payload.includes('"status":"running"')) {
+        break;
+      }
+      if (read.done) {
+        break;
+      }
+    }
+
+    expect(payload).toContain('event: box.updated');
+    expect(payload).toContain('"status":"starting"');
+    expect(payload).toContain('"status":"running"');
 
     reader.cancel().catch(() => undefined);
     await app.close();

@@ -21,6 +21,7 @@ export class MockDockerRuntime implements DockerRuntime {
   readonly networks = new Set<string>();
   readonly volumes = new Set<string>();
   readonly containers = new Map<string, FakeContainer>();
+  readonly operations: string[] = [];
   lastCreateContainerOptions: CreateContainerOptions | null = null;
   failOn: Partial<Record<keyof DockerRuntime, Error>> = {};
   private readonly containerEvents: ContainerRuntimeEvent[] = [];
@@ -30,16 +31,19 @@ export class MockDockerRuntime implements DockerRuntime {
 
   async createNetwork(name: string): Promise<void> {
     this.throwIfConfigured('createNetwork');
+    this.operations.push(`createNetwork:${name}`);
     this.networks.add(name);
   }
 
   async createVolume(name: string): Promise<void> {
     this.throwIfConfigured('createVolume');
+    this.operations.push(`createVolume:${name}`);
     this.volumes.add(name);
   }
 
   async createContainer(options: CreateContainerOptions): Promise<string> {
     this.throwIfConfigured('createContainer');
+    this.operations.push(`createContainer:${options.name}`);
     this.lastCreateContainerOptions = options;
     this.containerCounter += 1;
     const id = `mock-${this.containerCounter}`;
@@ -54,6 +58,7 @@ export class MockDockerRuntime implements DockerRuntime {
 
   async startContainer(containerId: string): Promise<void> {
     this.throwIfConfigured('startContainer');
+    this.operations.push(`startContainer:${containerId}`);
     const container = this.containers.get(containerId);
     if (!container) {
       return;
@@ -63,6 +68,7 @@ export class MockDockerRuntime implements DockerRuntime {
 
   async stopContainer(containerId: string): Promise<void> {
     this.throwIfConfigured('stopContainer');
+    this.operations.push(`stopContainer:${containerId}`);
     const container = this.containers.get(containerId);
     if (!container) {
       return;
@@ -72,16 +78,19 @@ export class MockDockerRuntime implements DockerRuntime {
 
   async removeContainer(containerId: string): Promise<void> {
     this.throwIfConfigured('removeContainer');
+    this.operations.push(`removeContainer:${containerId}`);
     this.containers.delete(containerId);
   }
 
   async removeNetwork(name: string): Promise<void> {
     this.throwIfConfigured('removeNetwork');
+    this.operations.push(`removeNetwork:${name}`);
     this.networks.delete(name);
   }
 
   async removeVolume(name: string): Promise<void> {
     this.throwIfConfigured('removeVolume');
+    this.operations.push(`removeVolume:${name}`);
     this.volumes.delete(name);
   }
 

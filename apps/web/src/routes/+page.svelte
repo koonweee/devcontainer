@@ -50,7 +50,13 @@
         <strong>{box.name}</strong>
         <span>{box.image}</span>
         <span>{box.status}</span>
-        <button onclick={() => store.stop(box.id)} disabled={box.status !== 'running'}>Stop</button>
+        {#if box.status === 'running'}
+          <button onclick={() => store.stop(box.id)}>Stop</button>
+        {:else if box.status === 'stopped'}
+          <button onclick={() => store.start(box.id)}>Start</button>
+        {:else}
+          <span></span>
+        {/if}
         <button onclick={() => store.remove(box.id)}>Remove</button>
       </li>
     {/each}

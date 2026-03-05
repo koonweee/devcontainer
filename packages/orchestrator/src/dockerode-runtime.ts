@@ -122,7 +122,16 @@ export class DockerodeRuntime implements DockerRuntime {
   }
 
   async startContainer(containerId: string): Promise<void> {
-    await this.docker.getContainer(containerId).start();
+    try {
+      await this.docker.getContainer(containerId).start();
+    } catch (error) {
+      const statusCode = (error as { statusCode?: number }).statusCode;
+      if (statusCode === 304) {
+        // Docker returns 304 when a container is already started; treat as idempotent success.
+        return;
+      }
+      throw error;
+    }
   }
 
   async stopContainer(containerId: string): Promise<void> {

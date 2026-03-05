@@ -17,6 +17,7 @@ const SSE_RECONNECT_BACKOFF_MS = [250, 500, 1_000, 2_000, 5_000] as const;
 interface DevboxClient {
   createBox(input: { name: string }): Promise<{ box: Box }>;
   listBoxes(): Promise<Box[]>;
+  startBox(boxId: string): Promise<unknown>;
   stopBox(boxId: string): Promise<unknown>;
   removeBox(boxId: string): Promise<unknown>;
   streamEvents(options?: { signal?: AbortSignal }): Promise<AsyncIterable<ApiStreamEvent>>;
@@ -69,6 +70,15 @@ export function createDevboxStore(initialBoxes: Box[], apiBaseUrl?: string, clie
     state.update((current) => ({
       ...current,
       boxes: current.boxes.map((box) => (box.id === boxId ? { ...box, status: 'stopping' } : box)),
+      error: null
+    }));
+  }
+
+  async function start(boxId: string): Promise<void> {
+    await apiClient.startBox(boxId);
+    state.update((current) => ({
+      ...current,
+      boxes: current.boxes.map((box) => (box.id === boxId ? { ...box, status: 'starting' } : box)),
       error: null
     }));
   }
@@ -177,6 +187,7 @@ export function createDevboxStore(initialBoxes: Box[], apiBaseUrl?: string, clie
     subscribe: state.subscribe,
     refresh,
     create,
+    start,
     stop,
     remove,
     connectEvents

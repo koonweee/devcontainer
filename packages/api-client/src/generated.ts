@@ -162,6 +162,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/boxes/{boxId}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    boxId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["def-1"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/boxes/{boxId}/stop": {
         parameters: {
             query?: never;
@@ -351,7 +388,7 @@ export interface components {
             id: string;
             name: string;
             image: string;
-            status: "creating" | "running" | "stopping" | "stopped" | "removing" | "error";
+            status: "creating" | "starting" | "running" | "stopping" | "stopped" | "removing" | "error";
             containerId: string | null;
             networkName: string;
             volumeName: string;
@@ -362,7 +399,7 @@ export interface components {
         /** Job */
         "def-1": {
             id: string;
-            type: "create" | "stop" | "remove" | "sync" | "cleanup";
+            type: "create" | "start" | "stop" | "remove" | "sync" | "cleanup";
             status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
             boxId: string | null;
             progress: number;

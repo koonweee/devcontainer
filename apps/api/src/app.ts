@@ -146,6 +146,19 @@ export async function buildApp(options?: BuildAppOptions) {
   );
 
   app.post(
+    '/v1/boxes/:boxId/start',
+    {
+      schema: {
+        params: BoxIdParamsSchema,
+        response: {
+          200: Type.Ref(JobSchema)
+        }
+      }
+    },
+    async (request) => orchestrator.startBox(request.params.boxId)
+  );
+
+  app.post(
     '/v1/boxes/:boxId/stop',
     {
       schema: {

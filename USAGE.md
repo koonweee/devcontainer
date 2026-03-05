@@ -16,7 +16,7 @@
 2. Configure deployment env values in `ENV.md` and set box-runtime envs in `docker/runtime/runtime.env`.
 3. Deploy `api` and `web` as separate containers/services, and mount persistent storage for SQLite at `DEVBOX_DB_PATH`.
 4. Ensure API container can access `/var/run/docker.sock`; do not grant that mount to web/CLI.
-5. Run post-deploy checks: API health, create/list/stop/remove flows, and logs/status streaming.
+5. Run post-deploy checks: API health, create/list/start/stop/remove flows, and logs/status streaming.
 
 # User flows
 1. Create a box:
@@ -35,6 +35,11 @@
 5. Stop a box:
    - API: `POST /v1/boxes/:boxId/stop`
    - CLI: `npm run -w @devbox/cli start -- stop <boxId|name>`
-6. Remove a box:
+6. Start a stopped box:
+   - API: `POST /v1/boxes/:boxId/start`
+   - Web: start button shown when box status is `stopped`
+   - CLI: `npm run -w @devbox/cli start -- start <boxId|name>`
+7. Remove a box:
    - API: `DELETE /v1/boxes/:boxId`
+   - Behavior: API remove performs stop-then-remove for managed containers before network/volume cleanup.
    - CLI: `npm run -w @devbox/cli start -- rm <boxId|name>`

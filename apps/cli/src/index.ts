@@ -41,6 +41,15 @@ program.command('ls').description('List boxes').action(async () => {
 });
 
 program
+  .command('start <box>')
+  .description('Start a stopped box by id or name')
+  .action(async (boxInput: string) => {
+    const box = await resolveBox(boxInput);
+    const job = await client.startBox(box.id);
+    console.log(`Queued start job ${job.id} for ${box.name}`);
+  });
+
+program
   .command('stop <box>')
   .description('Stop a box by id or name')
   .action(async (boxInput: string) => {

@@ -7,6 +7,7 @@ export const BoxSchema = Type.Object(
     image: Type.String(),
     status: Type.Union([
       Type.Literal('creating'),
+      Type.Literal('starting'),
       Type.Literal('running'),
       Type.Literal('stopping'),
       Type.Literal('stopped'),
@@ -28,6 +29,7 @@ export const JobSchema = Type.Object(
     id: Type.String(),
     type: Type.Union([
       Type.Literal('create'),
+      Type.Literal('start'),
       Type.Literal('stop'),
       Type.Literal('remove'),
       Type.Literal('sync'),

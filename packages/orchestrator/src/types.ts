@@ -1,12 +1,13 @@
 export type BoxStatus =
   | 'creating'
+  | 'starting'
   | 'running'
   | 'stopping'
   | 'stopped'
   | 'removing'
   | 'error';
 
-export type JobType = 'create' | 'stop' | 'remove' | 'sync' | 'cleanup';
+export type JobType = 'create' | 'start' | 'stop' | 'remove' | 'sync' | 'cleanup';
 
 export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 

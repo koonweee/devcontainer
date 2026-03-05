@@ -112,7 +112,7 @@ describe('DevboxOrchestrator', () => {
   });
 
   it('runs stop and remove transitions', async () => {
-    const { orchestrator } = buildHarness();
+    const { orchestrator, runtime } = buildHarness();
 
     const created = await orchestrator.createBox({
       name: 'box-bravo'
@@ -139,6 +139,68 @@ describe('DevboxOrchestrator', () => {
     const removed = await orchestrator.getBox(created.box.id);
     expect(removed).toBeNull();
     expect(removedEventBoxId).toBe(created.box.id);
+    expect(runtime.operations.findIndex((entry) => entry.startsWith('stopContainer:'))).toBeLessThan(
+      runtime.operations.findIndex((entry) => entry.startsWith('removeContainer:'))
+    );
+  });
+
+  it('runs start transition from stopped to running', async () => {
+    const { orchestrator } = buildHarness();
+
+    const created = await orchestrator.createBox({
+      name: 'box-start'
+    });
+    await waitForJob(orchestrator, created.job.id);
+
+    const stopJob = await orchestrator.stopBox(created.box.id);
+    expect(await waitForJob(orchestrator, stopJob.id)).toBe('succeeded');
+
+    const startJob = await orchestrator.startBox(created.box.id);
+    expect(startJob.type).toBe('start');
+    expect(await waitForJob(orchestrator, startJob.id)).toBe('succeeded');
+    expect((await orchestrator.getBox(created.box.id))?.status).toBe('running');
+  });
+
+  it('rejects start when box is not stopped', async () => {
+    const { orchestrator } = buildHarness();
+
+    const created = await orchestrator.createBox({
+      name: 'box-start-invalid'
+    });
+    await waitForJob(orchestrator, created.job.id);
+
+    await expect(orchestrator.startBox(created.box.id)).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it('stops before remove when deleting running boxes', async () => {
+    const { orchestrator, runtime } = buildHarness();
+
+    const created = await orchestrator.createBox({
+      name: 'box-remove-order'
+    });
+    await waitForJob(orchestrator, created.job.id);
+
+    const removeJob = await orchestrator.removeBox(created.box.id);
+    expect(await waitForJob(orchestrator, removeJob.id)).toBe('succeeded');
+
+    const stopIndex = runtime.operations.findIndex((entry) => entry.startsWith('stopContainer:'));
+    const removeIndex = runtime.operations.findIndex((entry) => entry.startsWith('removeContainer:'));
+    expect(stopIndex).toBeGreaterThanOrEqual(0);
+    expect(removeIndex).toBeGreaterThan(stopIndex);
+  });
+
+  it('fails remove and keeps box when stop during remove fails', async () => {
+    const { runtime, orchestrator } = buildHarness();
+
+    const created = await orchestrator.createBox({
+      name: 'box-remove-stop-fail'
+    });
+    await waitForJob(orchestrator, created.job.id);
+
+    runtime.failOn.stopContainer = new Error('stop failed during remove');
+    const removeJob = await orchestrator.removeBox(created.box.id);
+    expect(await waitForJob(orchestrator, removeJob.id)).toBe('failed');
+    expect((await orchestrator.getBox(created.box.id))?.status).toBe('error');
   });
 
   it('rejects invalid inputs and unmanaged resources', async () => {
@@ -455,6 +517,35 @@ describe('DevboxOrchestrator', () => {
     await orchestrator.stopRuntimeStatusMonitor();
 
     expect((await orchestrator.getBox(created.box.id))?.status).toBe('creating');
+  });
+
+  it('auto-recovers errored boxes to running on external start events', async () => {
+    const { runtime, orchestrator, boxes } = buildHarness();
+    const created = await orchestrator.createBox({ name: 'box-recover-start' });
+    await waitForJob(orchestrator, created.job.id);
+
+    runtime.failOn.stopContainer = new Error('forced stop failure');
+    const stopJob = await orchestrator.stopBox(created.box.id);
+    expect(await waitForJob(orchestrator, stopJob.id)).toBe('failed');
+    delete runtime.failOn.stopContainer;
+
+    const before = await orchestrator.getBox(created.box.id);
+    if (!before?.containerId) {
+      throw new Error('Expected container id for recovery test');
+    }
+    expect(before.status).toBe('error');
+
+    await orchestrator.startRuntimeStatusMonitor();
+    runtime.setContainerStatus(before.containerId, 'running');
+    runtime.emitContainerEvent({
+      containerId: before.containerId,
+      action: 'start',
+      labels: managedLabels(created.box.id),
+      timestamp: new Date().toISOString()
+    });
+
+    await waitForCondition(() => boxes.get(created.box.id)?.status === 'running');
+    await orchestrator.stopRuntimeStatusMonitor();
   });
 
   it('hard deletes boxes on external destroy events and emits box.removed', async () => {

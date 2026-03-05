@@ -50,6 +50,9 @@ describe('createDevboxStore', () => {
         listBoxesCalls += 1;
         return [initial];
       },
+      async startBox() {
+        return {};
+      },
       async stopBox() {
         return {};
       },
@@ -107,6 +110,9 @@ describe('createDevboxStore', () => {
         listBoxesCalls += 1;
         return [initial];
       },
+      async startBox() {
+        return {};
+      },
       async stopBox() {
         return {};
       },
@@ -162,6 +168,9 @@ describe('createDevboxStore', () => {
       async listBoxes() {
         return [initial];
       },
+      async startBox() {
+        return {};
+      },
       async stopBox() {
         return {};
       },
@@ -197,6 +206,45 @@ describe('createDevboxStore', () => {
     await waitForCondition(() => latest.boxes.length === 0);
 
     disconnect();
+    unsubscribe();
+  });
+
+  it('marks boxes as starting when start is requested', async () => {
+    const initial = makeBox({
+      status: 'stopped'
+    });
+
+    const client = {
+      async createBox() {
+        return { box: initial };
+      },
+      async listBoxes() {
+        return [initial];
+      },
+      async startBox() {
+        return {};
+      },
+      async stopBox() {
+        return {};
+      },
+      async removeBox() {
+        return {};
+      },
+      async streamEvents() {
+        async function* events(): AsyncIterable<ApiStreamEvent> {}
+        return events();
+      }
+    };
+
+    const store = createDevboxStore([initial], undefined, client);
+    let latest = { boxes: [initial], error: null as string | null, loading: false };
+    const unsubscribe = store.subscribe((value) => {
+      latest = value;
+    });
+
+    await store.start(initial.id);
+    expect(latest.boxes.find((box) => box.id === initial.id)?.status).toBe('starting');
+
     unsubscribe();
   });
 });

@@ -196,6 +196,45 @@ export class DevboxOrchestrator {
     return this.reconcileBoxForRead(box);
   }
 
+  async startBox(boxId: string): Promise<Job> {
+    const box = this.requireBox(boxId);
+    if (box.status !== 'stopped') {
+      throw new ValidationError(`Only stopped boxes can be started: ${boxId}`);
+    }
+    if (!box.containerId) {
+      throw new ValidationError(`Box has no container to start: ${boxId}`);
+    }
+    const containerId = box.containerId;
+
+    const starting = this.boxes.update(boxId, { status: 'starting' });
+    this.publishBox(starting);
+
+    const job = this.jobs.create({
+      type: 'start',
+      status: 'queued',
+      boxId,
+      progress: 0,
+      message: 'Start requested'
+    });
+    publishJob(this.events, job);
+
+    this.jobRunner.enqueue(job.id, async (ctx) => {
+      try {
+        ctx.setProgress(50, 'Starting container');
+        await this.assertManagedContainer(box.id, containerId);
+        await this.runtime.startContainer(containerId);
+
+        const running = this.boxes.update(box.id, { status: 'running' });
+        this.publishBox(running);
+      } catch (error) {
+        this.markBoxError(box.id);
+        throw error;
+      }
+    });
+
+    return job;
+  }
+
   async stopBox(boxId: string): Promise<Job> {
     const box = this.requireBox(boxId);
 
@@ -247,8 +286,11 @@ export class DevboxOrchestrator {
     this.jobRunner.enqueue(job.id, async (ctx) => {
       try {
         if (box.containerId) {
-          ctx.setProgress(30, 'Removing container');
+          ctx.setProgress(20, 'Stopping container');
           await this.assertManagedContainer(box.id, box.containerId);
+          await this.runtime.stopContainer(box.containerId);
+
+          ctx.setProgress(35, 'Removing container');
           await this.runtime.removeContainer(box.containerId);
         }
 
@@ -339,7 +381,7 @@ export class DevboxOrchestrator {
             continue;
           }
 
-          await this.reconcileBoxByIdForMonitor(boxId, event.containerId);
+          await this.reconcileBoxByIdForMonitor(boxId, event.containerId, event.action === 'start');
         }
         reconnectAttempts = 0;
       } catch {
@@ -367,11 +409,15 @@ export class DevboxOrchestrator {
       if (!STABLE_RECONCILE_STATUSES.has(box.status)) {
         continue;
       }
-      await this.reconcileBox(box, true);
+      await this.reconcileBox(box, true, false);
     }
   }
 
-  private async reconcileBoxByIdForMonitor(boxId: string, containerId: string): Promise<void> {
+  private async reconcileBoxByIdForMonitor(
+    boxId: string,
+    containerId: string,
+    allowErrorRecovery: boolean
+  ): Promise<void> {
     const box = this.boxes.get(boxId);
     if (!box) {
       return;
@@ -381,7 +427,7 @@ export class DevboxOrchestrator {
       return;
     }
 
-    await this.reconcileBox(box, true);
+    await this.reconcileBox(box, true, allowErrorRecovery);
   }
 
   private sleepWithAbort(ms: number, signal: AbortSignal): Promise<void> {
@@ -406,10 +452,14 @@ export class DevboxOrchestrator {
   }
 
   private async reconcileBoxForRead(box: Box): Promise<Box | null> {
-    return this.reconcileBox(box, false);
+    return this.reconcileBox(box, false, false);
   }
 
-  private async reconcileBox(box: Box, emitUpdate: boolean): Promise<Box | null> {
+  private async reconcileBox(
+    box: Box,
+    emitUpdate: boolean,
+    allowErrorRecovery: boolean
+  ): Promise<Box | null> {
     if (!STABLE_RECONCILE_STATUSES.has(box.status)) {
       return box;
     }
@@ -457,7 +507,7 @@ export class DevboxOrchestrator {
       return result.box ?? box;
     }
 
-    if (box.status === 'error') {
+    if (box.status === 'error' && !allowErrorRecovery) {
       return box;
     }
 

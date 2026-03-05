@@ -171,6 +171,10 @@ export function createApiClient(options: ApiClientOptions) {
       return unwrap(await client.POST('/v1/boxes/{boxId}/stop', { params: { path: { boxId } } }));
     },
 
+    async startBox(boxId: string): Promise<Job> {
+      return unwrap(await client.POST('/v1/boxes/{boxId}/start', { params: { path: { boxId } } }));
+    },
+
     async removeBox(boxId: string): Promise<Job> {
       return unwrap(await client.DELETE('/v1/boxes/{boxId}', { params: { path: { boxId } } }));
     },
