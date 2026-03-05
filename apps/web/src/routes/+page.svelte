@@ -9,7 +9,6 @@
   const store = createDevboxStore(data.initialBoxes, data.apiUrl);
 
   let name = '';
-  let image = 'debian:trixie-slim';
 
   onMount(() => {
     let disconnect: (() => void) | undefined;
@@ -25,7 +24,7 @@
 
   async function createBox(event: SubmitEvent): Promise<void> {
     event.preventDefault();
-    await store.create(name, image);
+    await store.create(name);
     name = '';
   }
 </script>
@@ -37,11 +36,6 @@
     <label>
       Name
       <input bind:value={name} minlength="3" maxlength="63" required placeholder="my-devbox" />
-    </label>
-
-    <label>
-      Image
-      <input bind:value={image} required placeholder="debian:trixie-slim" />
     </label>
 
     <button type="submit">Create</button>
@@ -87,7 +81,7 @@
 
   form {
     display: grid;
-    grid-template-columns: 1fr 1fr auto;
+    grid-template-columns: 1fr auto;
     gap: 0.8rem;
     align-items: end;
     margin-bottom: 1.25rem;

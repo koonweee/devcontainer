@@ -39,7 +39,6 @@ export interface Job {
 
 export interface CreateBoxInput {
   name: string;
-  image: string;
   command?: string[];
   env?: Record<string, string>;
 }

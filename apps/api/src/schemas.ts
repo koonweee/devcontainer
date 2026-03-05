@@ -55,7 +55,6 @@ export const JobSchema = Type.Object(
 export const CreateBoxBodySchema = Type.Object(
   {
     name: Type.String(),
-    image: Type.String(),
     command: Type.Optional(Type.Array(Type.String())),
     env: Type.Optional(Type.Record(Type.String(), Type.String()))
   },

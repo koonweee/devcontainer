@@ -76,7 +76,6 @@ export interface paths {
                 content: {
                     "application/json": {
                         name: string;
-                        image: string;
                         command?: string[];
                         env?: {
                             [key: string]: string;

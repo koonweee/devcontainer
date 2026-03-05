@@ -23,9 +23,8 @@ program
   .command('create')
   .description('Create a new box')
   .requiredOption('-n, --name <name>', 'box name')
-  .option('-i, --image <image>', 'container image', 'debian:trixie-slim')
-  .action(async (options: { name: string; image: string }) => {
-    const result = await client.createBox({ name: options.name, image: options.image });
+  .action(async (options: { name: string }) => {
+    const result = await client.createBox({ name: options.name });
     console.log(`Queued create job ${result.job.id} for box ${result.box.id}`);
   });
 

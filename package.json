@@ -9,6 +9,7 @@
   ],
   "scripts": {
     "build": "npm run -ws build",
+    "build:runtime-image": "./scripts/build-runtime-image.sh",
     "typecheck": "npm run -ws typecheck",
     "test": "npm run -ws test",
     "lint": "npm run typecheck",

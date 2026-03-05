@@ -25,7 +25,10 @@ async function waitForJob(
   throw new Error(`Timed out waiting for job ${jobId}`);
 }
 
-function buildHarness(): {
+function buildHarness(
+  runtimeImage?: string,
+  runtimeEnv: Record<string, string> = { DEV_PASSWORD: 'password' }
+): {
   runtime: MockDockerRuntime;
   orchestrator: DevboxOrchestrator;
   boxes: InMemoryBoxRepository;
@@ -35,7 +38,15 @@ function buildHarness(): {
   const events = new OrchestratorEvents();
   const runtime = new MockDockerRuntime();
   const runner = new JobRunner(jobs, events);
-  const orchestrator = new DevboxOrchestrator(runtime, boxes, jobs, runner, events);
+  const orchestrator = new DevboxOrchestrator(
+    runtime,
+    boxes,
+    jobs,
+    runner,
+    events,
+    runtimeImage,
+    runtimeEnv
+  );
   return { runtime, orchestrator, boxes };
 }
 
@@ -44,8 +55,7 @@ describe('DevboxOrchestrator', () => {
     const { runtime, orchestrator } = buildHarness();
 
     const { box, job } = await orchestrator.createBox({
-      name: 'box-alpha',
-      image: 'debian:trixie-slim'
+      name: 'box-alpha'
     });
 
     const status = await waitForJob(orchestrator, job.id);
@@ -58,12 +68,39 @@ describe('DevboxOrchestrator', () => {
     expect(runtime.volumes.has(saved!.volumeName)).toBe(true);
   });
 
+  it('uses configured runtime image when creating boxes', async () => {
+    const { runtime, orchestrator } = buildHarness('runtime:test');
+    const { box, job } = await orchestrator.createBox({ name: 'runtime-image-box' });
+    expect(await waitForJob(orchestrator, job.id)).toBe('succeeded');
+    expect(box.image).toBe('runtime:test');
+    expect(runtime.lastCreateContainerOptions?.env?.DEV_PASSWORD).toBe('password');
+  });
+
+  it('lets runtime env override request env keys', async () => {
+    const { runtime, orchestrator } = buildHarness('runtime:test', {
+      DEV_PASSWORD: 'configured-password',
+      TZ: 'UTC'
+    });
+    const created = await orchestrator.createBox({
+      name: 'runtime-env-box',
+      env: {
+        DEV_PASSWORD: 'request-password',
+        EXTRA: 'value'
+      }
+    });
+    expect(await waitForJob(orchestrator, created.job.id)).toBe('succeeded');
+    expect(runtime.lastCreateContainerOptions?.env).toEqual({
+      DEV_PASSWORD: 'configured-password',
+      TZ: 'UTC',
+      EXTRA: 'value'
+    });
+  });
+
   it('runs stop and remove transitions', async () => {
     const { orchestrator } = buildHarness();
 
     const created = await orchestrator.createBox({
-      name: 'box-bravo',
-      image: 'alpine:3.20'
+      name: 'box-bravo'
     });
     await waitForJob(orchestrator, created.job.id);
 
@@ -85,14 +122,12 @@ describe('DevboxOrchestrator', () => {
 
     await expect(
       orchestrator.createBox({
-        name: 'Invalid Name',
-        image: 'debian:trixie-slim'
+        name: 'Invalid Name'
       })
     ).rejects.toBeInstanceOf(ValidationError);
 
     const created = await orchestrator.createBox({
-      name: 'box-charlie',
-      image: 'debian:trixie-slim'
+      name: 'box-charlie'
     });
     await waitForJob(orchestrator, created.job.id);
 
@@ -118,16 +153,14 @@ describe('DevboxOrchestrator', () => {
 
     runtime.failOn.createNetwork = new Error('network create failed');
     const failedCreate = await orchestrator.createBox({
-      name: 'box-delta',
-      image: 'debian:trixie-slim'
+      name: 'box-delta'
     });
     expect(await waitForJob(orchestrator, failedCreate.job.id)).toBe('failed');
     expect((await orchestrator.getBox(failedCreate.box.id))?.status).toBe('error');
 
     delete runtime.failOn.createNetwork;
     const created = await orchestrator.createBox({
-      name: 'box-echo',
-      image: 'debian:trixie-slim'
+      name: 'box-echo'
     });
     expect(await waitForJob(orchestrator, created.job.id)).toBe('succeeded');
 
@@ -146,8 +179,7 @@ describe('DevboxOrchestrator', () => {
   it('reconciles running boxes to stopped when runtime reports exited', async () => {
     const { runtime, orchestrator } = buildHarness();
     const created = await orchestrator.createBox({
-      name: 'box-foxtrot',
-      image: 'debian:trixie-slim'
+      name: 'box-foxtrot'
     });
     await waitForJob(orchestrator, created.job.id);
 
@@ -167,8 +199,7 @@ describe('DevboxOrchestrator', () => {
   it('marks boxes as error and clears container id when inspect returns not found', async () => {
     const { runtime, orchestrator } = buildHarness();
     const created = await orchestrator.createBox({
-      name: 'box-golf',
-      image: 'debian:trixie-slim'
+      name: 'box-golf'
     });
     await waitForJob(orchestrator, created.job.id);
 
@@ -186,8 +217,7 @@ describe('DevboxOrchestrator', () => {
   it('marks boxes as error and preserves container id for unmanaged containers on reads', async () => {
     const { runtime, orchestrator } = buildHarness();
     const created = await orchestrator.createBox({
-      name: 'box-hotel',
-      image: 'debian:trixie-slim'
+      name: 'box-hotel'
     });
     await waitForJob(orchestrator, created.job.id);
 
@@ -210,8 +240,7 @@ describe('DevboxOrchestrator', () => {
   it('skips reconciliation for transitional statuses', async () => {
     const { runtime, orchestrator, boxes } = buildHarness();
     const created = await orchestrator.createBox({
-      name: 'box-india',
-      image: 'debian:trixie-slim'
+      name: 'box-india'
     });
     await waitForJob(orchestrator, created.job.id);
 
@@ -230,8 +259,7 @@ describe('DevboxOrchestrator', () => {
   it('marks stable boxes without container id as error', async () => {
     const { orchestrator, boxes } = buildHarness();
     const created = await orchestrator.createBox({
-      name: 'box-juliet',
-      image: 'debian:trixie-slim'
+      name: 'box-juliet'
     });
     await waitForJob(orchestrator, created.job.id);
 
@@ -248,8 +276,7 @@ describe('DevboxOrchestrator', () => {
   it('keeps persisted state when inspect fails with non-404 runtime errors', async () => {
     const { runtime, orchestrator } = buildHarness();
     const created = await orchestrator.createBox({
-      name: 'box-kilo',
-      image: 'debian:trixie-slim'
+      name: 'box-kilo'
     });
     await waitForJob(orchestrator, created.job.id);
 
@@ -261,8 +288,7 @@ describe('DevboxOrchestrator', () => {
   it('does not emit box.updated events for read-path reconciliation writes', async () => {
     const { runtime, orchestrator } = buildHarness();
     const created = await orchestrator.createBox({
-      name: 'box-lima',
-      image: 'debian:trixie-slim'
+      name: 'box-lima'
     });
     await waitForJob(orchestrator, created.job.id);
 
