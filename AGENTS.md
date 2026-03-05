@@ -53,3 +53,7 @@ This repo builds a Docker-image-based dev box platform. Keep implementations sim
   - Fastify route tests (`inject`)
   - optional minimal integration smoke tests
 - CI should run lint, typecheck, tests, and client generation checks.
+
+## Plan quality requirements
+- Every plan must include a short **"Functional changes after implementation"** section that states user-visible behavior changes.
+- Every plan must include **high-ROI tests** (small number, high confidence) tied to the most critical risks and core user flows.

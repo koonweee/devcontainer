@@ -204,3 +204,17 @@ For every implementation PR from this plan:
 When implementation is finished:
 - update this plan front matter `status` to `implemented`
 - update front matter `updated:` date
+
+
+## Functional changes after implementation
+- Users can create, list, stop, remove, and monitor dev boxes via API, web UI, and CLI without direct Docker access from web/CLI.
+- Long-running operations report progress/status as jobs and stream updates through SSE.
+- Managed Docker resources are isolated and cleaned up predictably using labels and naming conventions.
+- Web and CLI behavior stays contract-aligned through one generated OpenAPI client package.
+
+## High-ROI tests to prioritize
+- Orchestrator unit: create/stop/remove state transitions with mocked Docker runtime (highest regression risk).
+- Orchestrator unit: input validation + allowlist enforcement for names/images/options (security boundary).
+- API route tests: enqueue and status endpoints (`POST /v1/boxes`, `POST /v1/boxes/:id/stop`, `DELETE /v1/boxes/:id`, `GET /v1/jobs/:id`) using Fastify `inject`.
+- API route tests: SSE endpoint emits `job.updated`/`box.updated` and heartbeat shape validation.
+- Contract check: regenerate OpenAPI client and fail CI on diff + typecheck web/cli against generated client.
