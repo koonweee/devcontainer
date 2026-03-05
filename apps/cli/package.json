@@ -1,0 +1,17 @@
+{
+  "name": "@devbox/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "devbox": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "echo 'no tests'",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@devbox/api-client": "workspace:*"
+  }
+}

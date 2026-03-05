@@ -1,0 +1,15 @@
+{
+  "name": "@devbox/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "echo 'web build placeholder'",
+    "typecheck": "echo 'web typecheck placeholder'",
+    "test": "echo 'no tests'",
+    "lint": "echo 'web lint placeholder'"
+  },
+  "dependencies": {
+    "@devbox/api-client": "workspace:*"
+  }
+}

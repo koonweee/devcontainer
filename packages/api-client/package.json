@@ -1,0 +1,21 @@
+{
+  "name": "@devbox/api-client",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "echo 'no tests'",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "gen": "pnpm --filter @devbox/api openapi && openapi-typescript openapi.json -o src/generated.ts",
+    "check": "pnpm gen && git diff --exit-code src/generated.ts openapi.json"
+  },
+  "dependencies": {
+    "eventsource-parser": "^3.0.1"
+  },
+  "devDependencies": {
+    "openapi-typescript": "^7.6.1"
+  }
+}

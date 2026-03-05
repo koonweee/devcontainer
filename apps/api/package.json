@@ -1,0 +1,21 @@
+{
+  "name": "@devbox/api",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "openapi": "node --import tsx src/openapi.ts"
+  },
+  "dependencies": {
+    "@devbox/orchestrator": "workspace:*",
+    "fastify": "^5.2.1",
+    "@fastify/swagger": "^9.4.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.3"
+  }
+}
