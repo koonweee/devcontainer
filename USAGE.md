@@ -30,8 +30,11 @@
    - API SSE: `GET /v1/events`
    - Web: subscribes after hydration and applies `box.updated` and `box.removed` events directly; status and removals stream live without per-event full-list polling (external container deletion removes the box from state).
 4. Stream box logs:
-   - API SSE: `GET /v1/boxes/:boxId/logs?follow=true`
-   - CLI: `npm run -w @devbox/cli start -- logs -f <boxId|name>`
+   - API SSE: `GET /v1/boxes/:boxId/logs?follow=true&tail=200&since=<iso-or-unix-seconds>`
+   - CLI snapshot default: `npm run -w @devbox/cli start -- logs <boxId|name>`
+   - CLI follow: `npm run -w @devbox/cli start -- logs -f <boxId|name>`
+   - CLI bounded history: `npm run -w @devbox/cli start -- logs <boxId|name> --tail 200 --since 2026-01-01T00:00:00Z`
+   - Web: click `View logs` on any box to open tabbed log viewers; tabs keep per-box buffers in memory, and follow mode is opt-in per tab.
 5. Stop a box:
    - API: `POST /v1/boxes/:boxId/stop`
    - CLI: `npm run -w @devbox/cli start -- stop <boxId|name>`

@@ -1,0 +1,110 @@
+import { Command } from 'commander';
+
+import type { Box, BoxLogsEvent, Job } from '@devbox/api-client';
+
+export interface CliApiClient {
+  createBox(input: { name: string }): Promise<{ box: Box; job: Job }>;
+  listBoxes(): Promise<Box[]>;
+  startBox(boxId: string): Promise<Job>;
+  stopBox(boxId: string): Promise<Job>;
+  removeBox(boxId: string): Promise<Job>;
+  streamBoxLogs(
+    boxId: string,
+    options?: { follow?: boolean; since?: string; tail?: number; signal?: AbortSignal }
+  ): Promise<AsyncIterable<BoxLogsEvent>>;
+}
+
+export function parsePositiveIntegerOption(name: string, value: string): number {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+  return parsed;
+}
+
+async function resolveBox(client: CliApiClient, input: string): Promise<Box> {
+  const boxes = await client.listBoxes();
+  const match = boxes.find((box) => box.id === input || box.name === input);
+  if (!match) {
+    throw new Error(`Box not found: ${input}`);
+  }
+  return match;
+}
+
+export function buildCliProgram(client: CliApiClient): Command {
+  const program = new Command();
+
+  program.name('devbox').description('Devbox CLI (API client only)').version('0.1.0');
+
+  program
+    .command('create')
+    .description('Create a new box')
+    .requiredOption('-n, --name <name>', 'box name')
+    .action(async (options: { name: string }) => {
+      const result = await client.createBox({ name: options.name });
+      console.log(`Queued create job ${result.job.id} for box ${result.box.id}`);
+    });
+
+  program.command('ls').description('List boxes').action(async () => {
+    const boxes = await client.listBoxes();
+    if (boxes.length === 0) {
+      console.log('No boxes found');
+      return;
+    }
+
+    for (const box of boxes) {
+      console.log(`${box.id}\t${box.name}\t${box.status}\t${box.image}`);
+    }
+  });
+
+  program
+    .command('start <box>')
+    .description('Start a stopped box by id or name')
+    .action(async (boxInput: string) => {
+      const box = await resolveBox(client, boxInput);
+      const job = await client.startBox(box.id);
+      console.log(`Queued start job ${job.id} for ${box.name}`);
+    });
+
+  program
+    .command('stop <box>')
+    .description('Stop a box by id or name')
+    .action(async (boxInput: string) => {
+      const box = await resolveBox(client, boxInput);
+      const job = await client.stopBox(box.id);
+      console.log(`Queued stop job ${job.id} for ${box.name}`);
+    });
+
+  program
+    .command('rm <box>')
+    .description('Remove a box by id or name')
+    .action(async (boxInput: string) => {
+      const box = await resolveBox(client, boxInput);
+      const job = await client.removeBox(box.id);
+      console.log(`Queued remove job ${job.id} for ${box.name}`);
+    });
+
+  program
+    .command('logs <box>')
+    .description('Stream box logs by id or name')
+    .option('-f, --follow', 'follow log output', false)
+    .option('--since <iso>', 'stream logs since unix timestamp seconds or ISO datetime')
+    .option('--tail <lines>', 'request only the latest number of lines', (value) =>
+      parsePositiveIntegerOption('--tail', value)
+    )
+    .action(async (boxInput: string, options: { follow: boolean; since?: string; tail?: number }) => {
+      const box = await resolveBox(client, boxInput);
+      const stream = await client.streamBoxLogs(box.id, {
+        follow: options.follow,
+        since: options.since,
+        tail: options.tail
+      });
+
+      for await (const event of stream) {
+        const payload = event.data;
+        console.log(`[${payload.timestamp}] ${payload.stream}: ${payload.line}`);
+      }
+    });
+
+  return program;
+}

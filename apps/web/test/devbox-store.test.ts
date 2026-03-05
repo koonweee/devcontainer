@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import type { ApiStreamEvent, Box } from '@devbox/api-client';
+import { describe, expect, it, vi } from 'vitest';
+import type { ApiStreamEvent, Box, BoxLogsEvent } from '@devbox/api-client';
 
 import { createDevboxStore } from '../src/lib/devbox-store.js';
 
@@ -19,10 +19,7 @@ function makeBox(overrides: Partial<Box> = {}): Box {
   };
 }
 
-async function waitForCondition(
-  check: () => boolean,
-  timeoutMs = 2_000
-): Promise<void> {
+async function waitForCondition(check: () => boolean, timeoutMs = 2_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (check()) {
@@ -31,6 +28,14 @@ async function waitForCondition(
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error('Timed out waiting for condition');
+}
+
+async function* emptyEvents(): AsyncIterable<ApiStreamEvent> {
+  // no-op
+}
+
+async function* emptyLogs(): AsyncIterable<BoxLogsEvent> {
+  // no-op
 }
 
 describe('createDevboxStore', () => {
@@ -75,11 +80,21 @@ describe('createDevboxStore', () => {
           });
         }
         return events();
+      },
+      async streamBoxLogs() {
+        return emptyLogs();
       }
     };
 
     const store = createDevboxStore([initial], undefined, client);
-    let latest = { boxes: [initial], error: null as string | null, loading: false };
+    let latest = {
+      boxes: [initial],
+      error: null as string | null,
+      loading: false,
+      openLogTabs: [] as string[],
+      activeLogTab: null as string | null,
+      logViewers: {} as Record<string, unknown>
+    };
     const unsubscribe = store.subscribe((value) => {
       latest = value;
     });
@@ -140,11 +155,21 @@ describe('createDevboxStore', () => {
           });
         }
         return events();
+      },
+      async streamBoxLogs() {
+        return emptyLogs();
       }
     };
 
     const store = createDevboxStore([initial], undefined, client);
-    let latest = { boxes: [initial], error: null as string | null, loading: false };
+    let latest = {
+      boxes: [initial],
+      error: null as string | null,
+      loading: false,
+      openLogTabs: [] as string[],
+      activeLogTab: null as string | null,
+      logViewers: {} as Record<string, unknown>
+    };
     const unsubscribe = store.subscribe((value) => {
       latest = value;
     });
@@ -193,11 +218,21 @@ describe('createDevboxStore', () => {
           });
         }
         return events();
+      },
+      async streamBoxLogs() {
+        return emptyLogs();
       }
     };
 
     const store = createDevboxStore([initial], undefined, client);
-    let latest = { boxes: [initial], error: null as string | null, loading: false };
+    let latest = {
+      boxes: [initial],
+      error: null as string | null,
+      loading: false,
+      openLogTabs: [] as string[],
+      activeLogTab: null as string | null,
+      logViewers: {} as Record<string, unknown>
+    };
     const unsubscribe = store.subscribe((value) => {
       latest = value;
     });
@@ -210,9 +245,7 @@ describe('createDevboxStore', () => {
   });
 
   it('marks boxes as starting when start is requested', async () => {
-    const initial = makeBox({
-      status: 'stopped'
-    });
+    const initial = makeBox({ status: 'stopped' });
 
     const client = {
       async createBox() {
@@ -231,13 +264,22 @@ describe('createDevboxStore', () => {
         return {};
       },
       async streamEvents() {
-        async function* events(): AsyncIterable<ApiStreamEvent> {}
-        return events();
+        return emptyEvents();
+      },
+      async streamBoxLogs() {
+        return emptyLogs();
       }
     };
 
     const store = createDevboxStore([initial], undefined, client);
-    let latest = { boxes: [initial], error: null as string | null, loading: false };
+    let latest = {
+      boxes: [initial],
+      error: null as string | null,
+      loading: false,
+      openLogTabs: [] as string[],
+      activeLogTab: null as string | null,
+      logViewers: {} as Record<string, unknown>
+    };
     const unsubscribe = store.subscribe((value) => {
       latest = value;
     });
@@ -245,6 +287,175 @@ describe('createDevboxStore', () => {
     await store.start(initial.id);
     expect(latest.boxes.find((box) => box.id === initial.id)?.status).toBe('starting');
 
+    unsubscribe();
+  });
+
+  it('opens log tabs and loads snapshot logs using default tail', async () => {
+    const box = makeBox();
+    const streamBoxLogs = vi.fn(async (_boxId: string, options?: { follow?: boolean; tail?: number }) => {
+      async function* logs(): AsyncIterable<BoxLogsEvent> {
+        if (!options?.follow) {
+          yield {
+            event: 'box.logs',
+            data: {
+              boxId: box.id,
+              stream: 'stdout',
+              line: 'line-1',
+              timestamp: new Date('2026-01-01T00:00:00.000Z').toISOString()
+            }
+          };
+          yield {
+            event: 'box.logs',
+            data: {
+              boxId: box.id,
+              stream: 'stderr',
+              line: 'line-2',
+              timestamp: new Date('2026-01-01T00:00:01.000Z').toISOString()
+            }
+          };
+        }
+      }
+      return logs();
+    });
+
+    const store = createDevboxStore([box], undefined, {
+      async createBox() {
+        return { box };
+      },
+      async listBoxes() {
+        return [box];
+      },
+      async startBox() {
+        return {};
+      },
+      async stopBox() {
+        return {};
+      },
+      async removeBox() {
+        return {};
+      },
+      async streamEvents() {
+        return emptyEvents();
+      },
+      streamBoxLogs
+    });
+
+    let latest = {
+      boxes: [box],
+      error: null,
+      loading: false,
+      openLogTabs: [] as string[],
+      activeLogTab: null as string | null,
+      logViewers: {} as Record<string, { lines?: unknown[] }>
+    };
+    const unsubscribe = store.subscribe((value) => {
+      latest = value;
+    });
+
+    await store.openLogs(box.id);
+
+    expect(latest.openLogTabs).toEqual([box.id]);
+    expect(latest.activeLogTab).toBe(box.id);
+    expect(latest.logViewers[box.id]?.lines).toHaveLength(2);
+    expect(streamBoxLogs).toHaveBeenCalledWith(
+      box.id,
+      expect.objectContaining({ follow: false, tail: 200 })
+    );
+
+    unsubscribe();
+  });
+
+  it('starts follow stream and aborts when tab closes', async () => {
+    const box = makeBox();
+    let followAborted = false;
+
+    const store = createDevboxStore([box], undefined, {
+      async createBox() {
+        return { box };
+      },
+      async listBoxes() {
+        return [box];
+      },
+      async startBox() {
+        return {};
+      },
+      async stopBox() {
+        return {};
+      },
+      async removeBox() {
+        return {};
+      },
+      async streamEvents() {
+        return emptyEvents();
+      },
+      async streamBoxLogs(_boxId: string, options?: { follow?: boolean; signal?: AbortSignal }) {
+        async function* logs(): AsyncIterable<BoxLogsEvent> {
+          if (!options?.follow) {
+            yield {
+              event: 'box.logs',
+              data: {
+                boxId: box.id,
+                stream: 'stdout',
+                line: 'snapshot',
+                timestamp: new Date('2026-01-01T00:00:00.000Z').toISOString()
+              }
+            };
+            return;
+          }
+
+          yield {
+            event: 'box.logs',
+            data: {
+              boxId: box.id,
+              stream: 'stdout',
+              line: 'follow-line',
+              timestamp: new Date('2026-01-01T00:00:01.000Z').toISOString()
+            }
+          };
+
+          await new Promise<void>((resolve) => {
+            if (!options?.signal || options.signal.aborted) {
+              followAborted = true;
+              resolve();
+              return;
+            }
+            options.signal.addEventListener(
+              'abort',
+              () => {
+                followAborted = true;
+                resolve();
+              },
+              { once: true }
+            );
+          });
+        }
+        return logs();
+      }
+    });
+
+    let latest = {
+      boxes: [box],
+      error: null,
+      loading: false,
+      openLogTabs: [] as string[],
+      activeLogTab: null as string | null,
+      logViewers: {} as Record<string, { lines: Array<{ line: string }>; status: string }>
+    };
+    const unsubscribe = store.subscribe((value) => {
+      latest = value;
+    });
+
+    await store.openLogs(box.id);
+    store.setLogFollow(box.id, true);
+
+    await waitForCondition(() =>
+      (latest.logViewers[box.id]?.lines ?? []).some((line) => line.line === 'follow-line')
+    );
+
+    store.closeLogs(box.id);
+    await waitForCondition(() => followAborted);
+
+    expect(latest.openLogTabs).toHaveLength(0);
     unsubscribe();
   });
 });

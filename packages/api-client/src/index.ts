@@ -193,12 +193,13 @@ export function createApiClient(options: ApiClientOptions) {
 
     streamBoxLogs(
       boxId: string,
-      options?: { follow?: boolean; since?: string; signal?: AbortSignal }
+      options?: { follow?: boolean; since?: string; tail?: number; signal?: AbortSignal }
     ): Promise<AsyncIterable<BoxLogsEvent>> {
       const query = options
         ? {
             follow: options.follow,
-            since: options.since
+            since: options.since,
+            tail: options.tail
           }
         : undefined;
       return sse<BoxLogsEvent>(`/v1/boxes/${boxId}/logs`, {

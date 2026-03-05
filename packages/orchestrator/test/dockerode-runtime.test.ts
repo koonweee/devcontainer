@@ -87,4 +87,35 @@ describe('DockerodeRuntime', () => {
       })
     );
   });
+
+  it('passes tail and since options when requesting container logs', async () => {
+    const logs = vi
+      .fn()
+      .mockResolvedValue('2026-03-01T00:00:00.000000000Z hello from docker\n');
+    const runtime = new DockerodeRuntime({
+      getContainer: vi.fn().mockReturnValue({ logs }),
+      modem: { demuxStream: vi.fn() }
+    } as unknown as Dockerode);
+
+    const received = [];
+    for await (const event of runtime.streamContainerLogs('container-logs', {
+      follow: false,
+      since: '2026-03-01T00:00:00.000Z',
+      tail: 42
+    })) {
+      received.push(event);
+    }
+
+    expect(received).toHaveLength(1);
+    expect(logs).toHaveBeenCalledWith(
+      expect.objectContaining({
+        follow: false,
+        stdout: true,
+        stderr: true,
+        timestamps: true,
+        since: Math.floor(new Date('2026-03-01T00:00:00.000Z').getTime() / 1000),
+        tail: 42
+      })
+    );
+  });
 });

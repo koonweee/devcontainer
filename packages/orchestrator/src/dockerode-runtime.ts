@@ -32,6 +32,16 @@ function parseSince(input: string | undefined): number | undefined {
   return Math.floor(asDate.getTime() / 1000);
 }
 
+function parseTail(input: number | undefined): number | undefined {
+  if (input === undefined) {
+    return undefined;
+  }
+  if (!Number.isFinite(input)) {
+    return undefined;
+  }
+  return Math.max(1, Math.floor(input));
+}
+
 function parseLogLine(line: string): { timestamp: string; message: string } | null {
   const trimmed = line.trim();
   if (!trimmed) {
@@ -182,20 +192,23 @@ export class DockerodeRuntime implements DockerRuntime {
   ): AsyncIterable<RuntimeLogLine> {
     const container = this.docker.getContainer(containerId);
     const since = parseSince(options.since);
+    const tail = parseTail(options.tail);
     const raw = options.follow
       ? await container.logs({
           follow: true,
           stdout: true,
           stderr: true,
           timestamps: true,
-          since
+          since,
+          tail
         })
       : await container.logs({
           follow: false,
           stdout: true,
           stderr: true,
           timestamps: true,
-          since
+          since,
+          tail
         });
 
     if (Buffer.isBuffer(raw) || typeof raw === 'string') {

@@ -57,6 +57,7 @@ export interface LogEvent {
 export interface LogOptions {
   follow?: boolean;
   since?: string;
+  tail?: number;
 }
 
 export interface OrchestratorEventMap {

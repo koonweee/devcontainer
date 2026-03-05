@@ -72,7 +72,8 @@ export const JobIdParamsSchema = Type.Object({
 
 export const BoxLogsQuerySchema = Type.Object({
   follow: Type.Optional(Type.Boolean()),
-  since: Type.Optional(Type.String())
+  since: Type.Optional(Type.String()),
+  tail: Type.Optional(Type.Integer({ minimum: 1, maximum: 2000 }))
 });
 
 export const CreateBoxResponseSchema = Type.Object({

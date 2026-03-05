@@ -42,6 +42,7 @@ export interface RuntimeLogLine {
 export interface RuntimeLogOptions {
   follow?: boolean;
   since?: string;
+  tail?: number;
 }
 
 export interface RuntimeEventOptions {

@@ -195,7 +195,8 @@ export async function buildApp(options?: BuildAppOptions) {
     async (request, reply) => {
       const logs = await orchestrator.streamBoxLogs(request.params.boxId, {
         follow: request.query.follow,
-        since: request.query.since
+        since: request.query.since,
+        tail: request.query.tail
       });
 
       reply.hijack();

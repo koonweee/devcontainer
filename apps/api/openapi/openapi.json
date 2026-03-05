@@ -466,6 +466,16 @@
           },
           {
             "schema": {
+              "minimum": 1,
+              "maximum": 2000,
+              "type": "integer"
+            },
+            "in": "query",
+            "name": "tail",
+            "required": false
+          },
+          {
+            "schema": {
               "type": "string"
             },
             "in": "path",

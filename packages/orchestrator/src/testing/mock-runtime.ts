@@ -23,6 +23,8 @@ export class MockDockerRuntime implements DockerRuntime {
   readonly containers = new Map<string, FakeContainer>();
   readonly operations: string[] = [];
   lastCreateContainerOptions: CreateContainerOptions | null = null;
+  lastStreamContainerLogsOptions: RuntimeLogOptions | null = null;
+  lastStreamContainerLogsContainerId: string | null = null;
   failOn: Partial<Record<keyof DockerRuntime, Error>> = {};
   private readonly containerEvents: ContainerRuntimeEvent[] = [];
   private readonly eventWaiters: Array<() => void> = [];
@@ -109,9 +111,11 @@ export class MockDockerRuntime implements DockerRuntime {
 
   async *streamContainerLogs(
     containerId: string,
-    _options: RuntimeLogOptions
+    options: RuntimeLogOptions
   ): AsyncIterable<RuntimeLogLine> {
     this.throwIfConfigured('streamContainerLogs');
+    this.lastStreamContainerLogsContainerId = containerId;
+    this.lastStreamContainerLogsOptions = options;
     const container = this.containers.get(containerId);
     for (const log of container?.logs ?? []) {
       yield log;
