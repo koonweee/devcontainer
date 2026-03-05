@@ -77,6 +77,41 @@ describe('API routes', () => {
     await app.close();
   });
 
+  it('reconciles stale runtime status on list and detail reads', async () => {
+    const harness = buildInMemoryHarness();
+    const app = await buildApp({ orchestrator: harness.orchestrator });
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/v1/boxes',
+      payload: {
+        name: 'reconcile-api-box',
+        image: 'debian:trixie-slim'
+      }
+    });
+    expect(createRes.statusCode).toBe(200);
+    const created = createRes.json() as { box: { id: string }; job: { id: string } };
+    await waitForTerminalJob(app, created.job.id);
+
+    const createdBox = await harness.orchestrator.getBox(created.box.id);
+    if (!createdBox?.containerId) {
+      throw new Error('Expected container id for reconciliation route test');
+    }
+
+    harness.runtime.setContainerStatus(createdBox.containerId, 'exited');
+
+    const listRes = await app.inject({ method: 'GET', url: '/v1/boxes' });
+    expect(listRes.statusCode).toBe(200);
+    const listed = listRes.json() as Array<{ id: string; status: string }>;
+    expect(listed.find((box) => box.id === created.box.id)?.status).toBe('stopped');
+
+    const detailRes = await app.inject({ method: 'GET', url: `/v1/boxes/${created.box.id}` });
+    expect(detailRes.statusCode).toBe(200);
+    expect((detailRes.json() as { status: string }).status).toBe('stopped');
+
+    await app.close();
+  });
+
   it('returns validation errors on invalid payloads', async () => {
     const app = await buildApp({ orchestrator: buildInMemoryOrchestrator() });
 

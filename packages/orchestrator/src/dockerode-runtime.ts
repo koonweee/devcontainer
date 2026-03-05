@@ -119,7 +119,16 @@ export class DockerodeRuntime implements DockerRuntime {
   }
 
   async stopContainer(containerId: string): Promise<void> {
-    await this.docker.getContainer(containerId).stop();
+    try {
+      await this.docker.getContainer(containerId).stop();
+    } catch (error) {
+      const statusCode = (error as { statusCode?: number }).statusCode;
+      if (statusCode === 304) {
+        // Docker returns 304 when a container is already stopped; treat as idempotent success.
+        return;
+      }
+      throw error;
+    }
   }
 
   async removeContainer(containerId: string): Promise<void> {
@@ -139,7 +148,8 @@ export class DockerodeRuntime implements DockerRuntime {
       const details = await this.docker.getContainer(containerId).inspect();
       return {
         id: details.Id,
-        labels: details.Config?.Labels ?? {}
+        labels: details.Config?.Labels ?? {},
+        status: details.State?.Status ?? 'unknown'
       };
     } catch (error) {
       const statusCode = (error as { statusCode?: number }).statusCode;

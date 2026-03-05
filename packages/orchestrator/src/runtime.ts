@@ -6,9 +6,21 @@ export const MANAGED_LABELS = {
 
 export const MANAGED_OWNER = 'orchestrator';
 
+export type ContainerRuntimeStatus =
+  | 'created'
+  | 'restarting'
+  | 'running'
+  | 'removing'
+  | 'paused'
+  | 'exited'
+  | 'dead'
+  | 'unknown'
+  | (string & {});
+
 export interface ContainerDetails {
   id: string;
   labels: Record<string, string>;
+  status: ContainerRuntimeStatus;
 }
 
 export interface CreateContainerOptions {

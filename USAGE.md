@@ -22,3 +22,5 @@
 5. Remove a box via API (`DELETE /v1/boxes/:boxId`) or CLI: `... rm <boxId|name>`.
 6. Reuse removed box names; name uniqueness is enforced only for active (not soft-deleted) boxes.
 7. Stream logs through API SSE (`GET /v1/boxes/:boxId/logs?follow=true`) or CLI: `... logs -f <boxId|name>`.
+8. Box list/detail reads (`GET /v1/boxes`, `GET /v1/boxes/:boxId`) reconcile persisted status with current Docker container state.
+9. In web UI, `Stop` is enabled only for `running` boxes; API stop remains idempotent when Docker reports an already-stopped container.
