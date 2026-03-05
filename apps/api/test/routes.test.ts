@@ -4,7 +4,7 @@ import { buildApp } from '../src/app.js';
 import { buildInMemoryHarness, buildInMemoryOrchestrator } from './support/orchestrator.js';
 
 async function waitForTerminalJob(app: Awaited<ReturnType<typeof buildApp>>, jobId: string): Promise<void> {
-  const deadline = Date.now() + 2000;
+  const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
     const response = await app.inject({
       method: 'GET',
@@ -21,7 +21,10 @@ async function waitForTerminalJob(app: Awaited<ReturnType<typeof buildApp>>, job
 
 describe('API routes', () => {
   it('applies CORS headers and handles preflight requests', async () => {
-    const app = await buildApp({ orchestrator: buildInMemoryOrchestrator() });
+    const app = await buildApp({
+      orchestrator: buildInMemoryOrchestrator(),
+      corsOrigin: 'http://localhost:4173,http://localhost:5173'
+    });
 
     const preflight = await app.inject({
       method: 'OPTIONS',
@@ -36,8 +39,19 @@ describe('API routes', () => {
     expect(preflight.headers['access-control-allow-origin']).toBe('http://localhost:5173');
     expect(preflight.headers['access-control-allow-methods']).toContain('POST');
 
+    const preflight4173 = await app.inject({
+      method: 'OPTIONS',
+      url: '/v1/boxes',
+      headers: {
+        origin: 'http://localhost:4173',
+        'access-control-request-method': 'POST'
+      }
+    });
+    expect(preflight4173.statusCode).toBe(204);
+    expect(preflight4173.headers['access-control-allow-origin']).toBe('http://localhost:4173');
+
     const getBoxes = await app.inject({ method: 'GET', url: '/v1/boxes' });
-    expect(getBoxes.headers['access-control-allow-origin']).toBe('http://localhost:5173');
+    expect(getBoxes.headers['access-control-allow-origin']).toBe('http://localhost:4173');
     await app.close();
   });
 
@@ -102,6 +116,36 @@ describe('API routes', () => {
     const startRes = await app.inject({ method: 'POST', url: `/v1/boxes/${created.box.id}/start` });
     expect(startRes.statusCode).toBe(400);
     expect((startRes.json() as { message: string }).message).toContain('Only stopped boxes');
+    await app.close();
+  });
+
+  it('returns config lock payload with boxCount when boxes exist', async () => {
+    const app = await buildApp({ orchestrator: buildInMemoryOrchestrator() });
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/v1/boxes',
+      payload: { name: 'lock-payload-box' }
+    });
+    expect(createRes.statusCode).toBe(200);
+    const created = createRes.json() as { job: { id: string } };
+    await waitForTerminalJob(app, created.job.id);
+
+    const putRes = await app.inject({
+      method: 'PUT',
+      url: '/v1/tailnet/config',
+      payload: {
+        tailnet: 'example.com',
+        oauthClientId: 'new-client',
+        oauthClientSecret: 'new-secret'
+      }
+    });
+    expect(putRes.statusCode).toBe(409);
+    expect(putRes.json()).toMatchObject({
+      message: expect.stringContaining('while 1 boxes exist'),
+      boxCount: 1
+    });
+
     await app.close();
   });
 

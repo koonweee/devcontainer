@@ -4,7 +4,7 @@ import swagger from '@fastify/swagger';
 import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import { Type } from '@sinclair/typebox';
 import type { DevboxOrchestrator } from '@devbox/orchestrator/orchestrator';
-import { NotFoundError, SecurityError, ValidationError } from '@devbox/orchestrator/errors';
+import { ConfigLockedError, NotFoundError, SecurityError, SetupRequiredError, ValidationError } from '@devbox/orchestrator/errors';
 
 import {
   BoxIdParamsSchema,
@@ -13,13 +13,25 @@ import {
   CreateBoxBodySchema,
   CreateBoxResponseSchema,
   JobIdParamsSchema,
-  JobSchema
+  JobSchema,
+  TailnetConfigBodySchema,
+  TailnetConfigSchema
 } from './schemas.js';
 
 interface BuildAppOptions {
   orchestrator?: DevboxOrchestrator;
   heartbeatMs?: number;
   corsOrigin?: string;
+}
+
+function parseCorsOrigins(input: string): string[] {
+  const unique = new Set(
+    input
+      .split(',')
+      .map((origin) => origin.trim())
+      .filter(Boolean)
+  );
+  return [...unique];
 }
 
 function writeSseEvent(reply: FastifyReply, event: string, payload: unknown): void {
@@ -52,6 +64,16 @@ function attachErrorMapping(app: FastifyInstance): void {
       return;
     }
 
+    if (error instanceof ConfigLockedError) {
+      reply.status(409).send({ message: error.message, boxCount: error.boxCount });
+      return;
+    }
+
+    if (error instanceof SetupRequiredError) {
+      reply.status(400).send({ message: error.message });
+      return;
+    }
+
     reply.status(500).send({ message: 'Internal server error' });
   });
 }
@@ -72,12 +94,22 @@ export async function buildApp(options?: BuildAppOptions) {
   }
   await orchestrator.startRuntimeStatusMonitor();
   const heartbeatMs = options?.heartbeatMs ?? 15_000;
-  const corsOrigin = options?.corsOrigin ?? process.env.DEVBOX_WEB_ORIGIN ?? 'http://localhost:5173';
+  const configuredCorsOrigins = parseCorsOrigins(
+    options?.corsOrigin ?? process.env.DEVBOX_WEB_ORIGIN ?? 'http://localhost:5173,http://localhost:4173'
+  );
+  const defaultCorsOrigin = configuredCorsOrigins[0] ?? 'http://localhost:5173';
+  const resolveCorsOrigin = (request: FastifyRequest): string => {
+    const requestOrigin = typeof request.headers.origin === 'string' ? request.headers.origin : null;
+    if (requestOrigin && configuredCorsOrigins.includes(requestOrigin)) {
+      return requestOrigin;
+    }
+    return defaultCorsOrigin;
+  };
 
   app.addHook('onRequest', async (request, reply) => {
-    reply.header('Access-Control-Allow-Origin', corsOrigin);
+    reply.header('Access-Control-Allow-Origin', resolveCorsOrigin(request));
     reply.header('Vary', 'Origin');
-    reply.header('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
+    reply.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
     reply.header('Access-Control-Allow-Headers', 'Content-Type,Accept,Authorization');
 
     if (request.method === 'OPTIONS') {
@@ -96,6 +128,7 @@ export async function buildApp(options?: BuildAppOptions) {
 
   app.addSchema(BoxSchema);
   app.addSchema(JobSchema);
+  app.addSchema(TailnetConfigSchema);
 
   attachErrorMapping(app);
 
@@ -200,7 +233,7 @@ export async function buildApp(options?: BuildAppOptions) {
       });
 
       reply.hijack();
-      reply.raw.setHeader('Access-Control-Allow-Origin', corsOrigin);
+      reply.raw.setHeader('Access-Control-Allow-Origin', resolveCorsOrigin(request));
       reply.raw.setHeader('Vary', 'Origin');
       reply.raw.setHeader('Content-Type', 'text/event-stream');
       reply.raw.setHeader('Cache-Control', 'no-cache');
@@ -246,9 +279,48 @@ export async function buildApp(options?: BuildAppOptions) {
     }
   );
 
-  app.get('/v1/events', async (_request, reply) => {
+  app.get(
+    '/v1/tailnet/config',
+    {
+      schema: {
+        response: {
+          200: Type.Ref(TailnetConfigSchema)
+        }
+      }
+    },
+    async () => {
+      const config = await orchestrator.getTailnetConfig();
+      if (!config) {
+        throw new NotFoundError('Tailnet config not set');
+      }
+      return config;
+    }
+  );
+
+  app.put(
+    '/v1/tailnet/config',
+    {
+      schema: {
+        body: TailnetConfigBodySchema,
+        response: {
+          200: Type.Ref(TailnetConfigSchema)
+        }
+      }
+    },
+    async (request) => orchestrator.setTailnetConfig(request.body)
+  );
+
+  app.delete(
+    '/v1/tailnet/config',
+    async () => {
+      await orchestrator.deleteTailnetConfig();
+      return { message: 'Tailnet config deleted' };
+    }
+  );
+
+  app.get('/v1/events', async (request, reply) => {
     reply.hijack();
-    reply.raw.setHeader('Access-Control-Allow-Origin', corsOrigin);
+    reply.raw.setHeader('Access-Control-Allow-Origin', resolveCorsOrigin(request));
     reply.raw.setHeader('Vary', 'Origin');
     reply.raw.setHeader('Content-Type', 'text/event-stream');
     reply.raw.setHeader('Cache-Control', 'no-cache');

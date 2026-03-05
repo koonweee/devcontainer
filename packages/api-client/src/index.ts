@@ -13,6 +13,26 @@ export interface CreateBoxInput {
   env?: Record<string, string>;
 }
 
+export interface TailnetConfig {
+  tailnet: string;
+  oauthClientId: string;
+  oauthClientSecret: string;
+  tagsCsv: string;
+  hostnamePrefix: string;
+  authkeyExpirySeconds: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TailnetConfigInput {
+  tailnet: string;
+  oauthClientId: string;
+  oauthClientSecret: string;
+  tagsCsv?: string;
+  hostnamePrefix?: string;
+  authkeyExpirySeconds?: number;
+}
+
 export interface SseEvent<T = unknown> {
   event: string;
   data: T;
@@ -61,6 +81,33 @@ export interface ApiClientOptions {
   fetchImpl?: typeof fetch;
 }
 
+export class ApiError extends Error {
+  readonly status: number;
+  readonly payload: unknown;
+
+  constructor(status: number, payload: unknown) {
+    const payloadMessage =
+      typeof payload === 'object' &&
+      payload !== null &&
+      'message' in payload &&
+      typeof (payload as { message?: unknown }).message === 'string'
+        ? (payload as { message: string }).message
+        : 'unknown';
+    super(`API error ${status}: ${payloadMessage}`);
+    this.name = 'ApiError';
+    this.status = status;
+    this.payload = payload;
+  }
+}
+
+export function getConfigLockedBoxCount(error: unknown): number | null {
+  if (!(error instanceof ApiError) || error.status !== 409) {
+    return null;
+  }
+  const boxCount = (error.payload as { boxCount?: unknown } | null)?.boxCount;
+  return typeof boxCount === 'number' ? boxCount : null;
+}
+
 function buildUrl(
   baseUrl: string,
   path: string,
@@ -75,33 +122,13 @@ function buildUrl(
   return url.toString();
 }
 
-function formatOpenApiError(error: unknown): string {
-  if (error === undefined) {
-    return 'Unknown API error';
-  }
-
-  if (typeof error === 'string') {
-    return error;
-  }
-
-  if (typeof error === 'object' && error !== null) {
-    if ('message' in error && typeof (error as { message?: unknown }).message === 'string') {
-      return (error as { message: string }).message;
-    }
-    try {
-      return JSON.stringify(error);
-    } catch {
-      return 'API error (unserializable payload)';
-    }
-  }
-
-  return String(error);
+async function parseResponsePayload(response: Response): Promise<unknown> {
+  return response.json().catch(() => ({}));
 }
 
 function unwrap<T>(result: { data?: T; error?: unknown; response: Response }): T {
   if (result.error !== undefined || result.data === undefined) {
-    const message = formatOpenApiError(result.error);
-    throw new Error(`API error ${result.response.status}: ${message}`);
+    throw new ApiError(result.response.status, result.error ?? {});
   }
 
   return result.data;
@@ -185,6 +212,40 @@ export function createApiClient(options: ApiClientOptions) {
 
     async getJob(jobId: string): Promise<Job> {
       return unwrap(await client.GET('/v1/jobs/{jobId}', { params: { path: { jobId } } }));
+    },
+
+    async getTailnetConfig(): Promise<TailnetConfig> {
+      const response = await fetchImpl(buildUrl(options.baseUrl, '/v1/tailnet/config'), {
+        headers: { accept: 'application/json' }
+      });
+      if (response.status === 404) {
+        throw new Error('Tailnet config not set');
+      }
+      if (!response.ok) {
+        throw new Error(`API error ${response.status}`);
+      }
+      return (await response.json()) as TailnetConfig;
+    },
+
+    async setTailnetConfig(input: TailnetConfigInput): Promise<TailnetConfig> {
+      const response = await fetchImpl(buildUrl(options.baseUrl, '/v1/tailnet/config'), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify(input)
+      });
+      if (!response.ok) {
+        throw new ApiError(response.status, await parseResponsePayload(response));
+      }
+      return (await response.json()) as TailnetConfig;
+    },
+
+    async deleteTailnetConfig(): Promise<void> {
+      const response = await fetchImpl(buildUrl(options.baseUrl, '/v1/tailnet/config'), {
+        method: 'DELETE'
+      });
+      if (!response.ok) {
+        throw new ApiError(response.status, await parseResponsePayload(response));
+      }
     },
 
     streamEvents(options?: { signal?: AbortSignal }): Promise<AsyncIterable<ApiStreamEvent>> {

@@ -347,6 +347,88 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/tailnet/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["def-2"];
+                    };
+                };
+            };
+        };
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        tailnet: string;
+                        oauthClientId: string;
+                        oauthClientSecret: string;
+                        tagsCsv?: string;
+                        hostnamePrefix?: string;
+                        authkeyExpirySeconds?: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["def-2"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/events": {
         parameters: {
             query?: never;
@@ -394,6 +476,7 @@ export interface components {
             networkName: string;
             volumeName: string;
             tailnetUrl: string | null;
+            tailnetDeviceId: string | null;
             createdAt: string;
             updatedAt: string;
         };
@@ -409,6 +492,17 @@ export interface components {
             createdAt: string;
             startedAt: string | null;
             finishedAt: string | null;
+        };
+        /** TailnetConfig */
+        "def-2": {
+            tailnet: string;
+            oauthClientId: string;
+            oauthClientSecret: string;
+            tagsCsv: string;
+            hostnamePrefix: string;
+            authkeyExpirySeconds: number;
+            createdAt: string;
+            updatedAt: string;
         };
     };
     responses: never;

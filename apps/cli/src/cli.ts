@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 
-import type { Box, BoxLogsEvent, Job } from '@devbox/api-client';
+import { getConfigLockedBoxCount } from '@devbox/api-client';
+import type { Box, BoxLogsEvent, Job, TailnetConfig, TailnetConfigInput } from '@devbox/api-client';
 
 export interface CliApiClient {
   createBox(input: { name: string }): Promise<{ box: Box; job: Job }>;
@@ -12,6 +13,9 @@ export interface CliApiClient {
     boxId: string,
     options?: { follow?: boolean; since?: string; tail?: number; signal?: AbortSignal }
   ): Promise<AsyncIterable<BoxLogsEvent>>;
+  getTailnetConfig(): Promise<TailnetConfig>;
+  setTailnetConfig(input: TailnetConfigInput): Promise<TailnetConfig>;
+  deleteTailnetConfig(): Promise<void>;
 }
 
 export function parsePositiveIntegerOption(name: string, value: string): number {
@@ -29,6 +33,11 @@ async function resolveBox(client: CliApiClient, input: string): Promise<Box> {
     throw new Error(`Box not found: ${input}`);
   }
   return match;
+}
+
+function exitWithConfigLockedError(boxCount: number): never {
+  console.error(`Error: Cannot modify tailnet config while ${boxCount} boxes exist. Remove all boxes first.`);
+  process.exit(1);
 }
 
 export function buildCliProgram(client: CliApiClient): Command {
@@ -103,6 +112,89 @@ export function buildCliProgram(client: CliApiClient): Command {
       for await (const event of stream) {
         const payload = event.data;
         console.log(`[${payload.timestamp}] ${payload.stream}: ${payload.line}`);
+      }
+    });
+
+  const setup = program.command('setup').description('Manage platform setup');
+
+  setup
+    .command('tailnet')
+    .description('Configure Tailscale credentials (required scopes: auth_keys write, devices:core write)')
+    .requiredOption('--tailnet <tailnet>', 'Tailscale Tailnet ID (Admin > Settings > General)')
+    .requiredOption('--client-id <id>', 'OAuth client ID')
+    .requiredOption('--client-secret <secret>', 'OAuth client secret')
+    .option('--tags <csv>', 'comma-separated tags (must be allowed by ACL tagOwners)', 'tag:devcontainer')
+    .option('--hostname-prefix <prefix>', 'hostname prefix', 'devbox')
+    .option('--authkey-expiry <seconds>', 'auth key expiry in seconds', (v) =>
+      parsePositiveIntegerOption('--authkey-expiry', v)
+    )
+    .addHelpText(
+      'after',
+      [
+        '',
+        'Requirements:',
+        '- Tailnet value: use Tailnet ID from Admin > Settings > General',
+        '- OAuth scopes: auth_keys (write), devices:core (write)',
+        '- ACL tagOwners must allow configured tags (default tag:devcontainer)',
+        '- Example tagOwners: {"tagOwners":{"tag:devcontainer":["autogroup:admin","tag:devcontainer"]}}'
+      ].join('\n')
+    )
+    .action(async (options: {
+      tailnet: string;
+      clientId: string;
+      clientSecret: string;
+      tags: string;
+      hostnamePrefix: string;
+      authkeyExpiry?: number;
+    }) => {
+      try {
+        const config = await client.setTailnetConfig({
+          tailnet: options.tailnet,
+          oauthClientId: options.clientId,
+          oauthClientSecret: options.clientSecret,
+          tagsCsv: options.tags,
+          hostnamePrefix: options.hostnamePrefix,
+          authkeyExpirySeconds: options.authkeyExpiry
+        });
+        console.log(`Tailnet configured: ${config.tailnet} (prefix: ${config.hostnamePrefix})`);
+      } catch (err) {
+        const boxCount = getConfigLockedBoxCount(err);
+        if (boxCount !== null) {
+          exitWithConfigLockedError(boxCount);
+        }
+        throw err;
+      }
+    });
+
+  setup
+    .command('status')
+    .description('Show current setup status')
+    .action(async () => {
+      try {
+        const config = await client.getTailnetConfig();
+        console.log(`Tailnet: ${config.tailnet}`);
+        console.log(`OAuth client: ${config.oauthClientId}`);
+        console.log(`Tags: ${config.tagsCsv}`);
+        console.log(`Hostname prefix: ${config.hostnamePrefix}`);
+        console.log(`Auth key expiry: ${config.authkeyExpirySeconds}s`);
+      } catch {
+        console.log('Tailnet: not configured');
+      }
+    });
+
+  setup
+    .command('clear')
+    .description('Clear tailnet configuration')
+    .action(async () => {
+      try {
+        await client.deleteTailnetConfig();
+        console.log('Tailnet configuration cleared');
+      } catch (err) {
+        const boxCount = getConfigLockedBoxCount(err);
+        if (boxCount !== null) {
+          exitWithConfigLockedError(boxCount);
+        }
+        throw err;
       }
     });
 

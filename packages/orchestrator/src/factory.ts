@@ -6,6 +6,7 @@ import { OrchestratorEvents } from './events.js';
 import { JobRunner } from './job-runner.js';
 import { DockerodeRuntime } from './dockerode-runtime.js';
 import { DevboxOrchestrator } from './orchestrator.js';
+import { HttpTailscaleClient } from './tailscale-client.js';
 
 export interface OrchestratorFactoryOptions {
   dbPath?: string;
@@ -84,6 +85,7 @@ export function createOrchestrator(options?: OrchestratorFactoryOptions): Devbox
   const events = new OrchestratorEvents();
   const runner = new JobRunner(repositories.jobs, events);
   const runtime = new DockerodeRuntime();
+  const tailscaleClient = new HttpTailscaleClient();
   return new DevboxOrchestrator(
     runtime,
     repositories.boxes,
@@ -91,6 +93,8 @@ export function createOrchestrator(options?: OrchestratorFactoryOptions): Devbox
     runner,
     events,
     runtimeImage,
-    runtimeEnv
+    runtimeEnv,
+    repositories.tailnetConfig,
+    tailscaleClient
   );
 }

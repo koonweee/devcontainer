@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 
-import { NotFoundError, SecurityError, ValidationError } from './errors.js';
+import { ConfigLockedError, NotFoundError, SecurityError, SetupRequiredError, ValidationError } from './errors.js';
 import type { OrchestratorEvents } from './events.js';
 import { JobRunner, publishJob } from './job-runner.js';
-import type { BoxRepository, JobRepository } from './repositories.js';
+import type { BoxRepository, JobRepository, TailnetConfigRepository } from './repositories.js';
 import {
   assertManaged,
   MANAGED_LABELS,
@@ -11,6 +11,7 @@ import {
   type ContainerRuntimeStatus,
   type DockerRuntime
 } from './runtime.js';
+import type { TailscaleClient, TailscaleDevice } from './tailscale-client.js';
 import type {
   Box,
   CreateBoxInput,
@@ -18,7 +19,9 @@ import type {
   Job,
   JobFilter,
   LogEvent,
-  LogOptions
+  LogOptions,
+  TailnetConfig,
+  TailnetConfigInput
 } from './types.js';
 import { validateCreateBoxInput } from './validation.js';
 
@@ -59,11 +62,13 @@ const RUNTIME_RECONCILE_ACTIONS = new Set([
   'restart',
   'kill'
 ]);
+const DEVICE_CAPTURE_RETRY_DELAYS = [1_000, 2_000, 3_000, 5_000, 8_000, 13_000] as const;
 
 /** Coordinates box lifecycle operations, jobs, logs, and security checks. */
 export class DevboxOrchestrator {
   private runtimeMonitorAbortController: AbortController | null = null;
   private runtimeMonitorTask: Promise<void> | null = null;
+  private readonly cleanupInProgress = new Set<string>();
 
   constructor(
     private readonly runtime: DockerRuntime,
@@ -72,8 +77,48 @@ export class DevboxOrchestrator {
     private readonly jobRunner: JobRunner,
     readonly events: OrchestratorEvents,
     private readonly runtimeImage = 'devbox-runtime:local',
-    private readonly runtimeEnv: Record<string, string> = {}
+    private readonly runtimeEnv: Record<string, string> = {},
+    private readonly tailnetConfigs: TailnetConfigRepository | null = null,
+    private readonly tailscaleClient: TailscaleClient | null = null
   ) {}
+
+  // --- Tailnet config management ---
+
+  async getTailnetConfig(): Promise<(Omit<TailnetConfig, 'oauthClientSecret'> & { oauthClientSecret: string }) | null> {
+    if (!this.tailnetConfigs) {
+      return null;
+    }
+    const config = this.tailnetConfigs.get();
+    if (!config) {
+      return null;
+    }
+    return { ...config, oauthClientSecret: '********' };
+  }
+
+  async setTailnetConfig(input: TailnetConfigInput): Promise<Omit<TailnetConfig, 'oauthClientSecret'> & { oauthClientSecret: string }> {
+    if (!this.tailnetConfigs) {
+      throw new ValidationError('Tailnet configuration is not available');
+    }
+    const boxCount = this.boxes.count();
+    if (boxCount > 0) {
+      throw new ConfigLockedError(`Cannot modify tailnet config while ${boxCount} boxes exist`, boxCount);
+    }
+    const config = this.tailnetConfigs.set(input);
+    return { ...config, oauthClientSecret: '********' };
+  }
+
+  async deleteTailnetConfig(): Promise<void> {
+    if (!this.tailnetConfigs) {
+      throw new ValidationError('Tailnet configuration is not available');
+    }
+    const boxCount = this.boxes.count();
+    if (boxCount > 0) {
+      throw new ConfigLockedError(`Cannot delete tailnet config while ${boxCount} boxes exist`, boxCount);
+    }
+    this.tailnetConfigs.delete();
+  }
+
+  // --- Box lifecycle ---
 
   async startRuntimeStatusMonitor(): Promise<void> {
     if (this.runtimeMonitorTask) {
@@ -100,13 +145,19 @@ export class DevboxOrchestrator {
 
     try {
       await this.runtimeMonitorTask;
-    } catch {
-      // Monitor failures are intentionally swallowed on shutdown.
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[orchestrator] runtime status monitor shutdown warning: ${message}`);
     }
   }
 
   async createBox(input: CreateBoxInput): Promise<CreateBoxResult> {
     validateCreateBoxInput(input);
+
+    const tailnetConfig = this.tailnetConfigs?.get() ?? null;
+    if (this.tailnetConfigs && !tailnetConfig) {
+      throw new SetupRequiredError('Tailnet configuration required before creating boxes. Complete setup first.');
+    }
 
     const existing = this.boxes.getByName(input.name);
     if (existing) {
@@ -143,32 +194,66 @@ export class DevboxOrchestrator {
 
     this.jobRunner.enqueue(job.id, async (ctx) => {
       try {
-        ctx.setProgress(10, 'Creating network');
+        ctx.setProgress(5, 'Creating network');
         await this.runtime.createNetwork(box.networkName, managedLabels(box.id));
 
-        ctx.setProgress(30, 'Creating volume');
+        ctx.setProgress(15, 'Creating volume');
         await this.runtime.createVolume(box.volumeName, managedLabels(box.id));
 
-        ctx.setProgress(55, 'Creating container');
+        // Mint Tailscale auth key if configured
+        let tailscaleEnv: Record<string, string> = {};
+        let tailnetHostname: string | undefined;
+        if (tailnetConfig && this.tailscaleClient) {
+          ctx.setProgress(25, 'Minting Tailscale auth key');
+          const authKey = await this.tailscaleClient.mintAuthKey(tailnetConfig);
+          const shortId = box.id.slice(0, 8);
+          tailnetHostname = `${tailnetConfig.hostnamePrefix}-${box.name}-${shortId}`;
+          tailscaleEnv = {
+            DEVBOX_TAILSCALE_AUTHKEY: authKey.key,
+            DEVBOX_TAILSCALE_HOSTNAME: tailnetHostname
+          };
+        }
+
+        ctx.setProgress(40, 'Creating container');
+        const containerEnv = { ...(input.env ?? {}), ...tailscaleEnv, ...this.runtimeEnv };
         const containerId = await this.runtime.createContainer({
           name: containerName(box.id),
           image: box.image,
           networkName: box.networkName,
           volumeName: box.volumeName,
           labels: managedLabels(box.id),
-          // Configured runtime env wins over request env to keep server-side policy authoritative.
-          env: { ...(input.env ?? {}), ...this.runtimeEnv },
-          command: input.command
+          env: containerEnv,
+          command: input.command,
+          devices: tailnetConfig
+            ? [{ PathOnHost: '/dev/net/tun', PathInContainer: '/dev/net/tun', CgroupPermissions: 'rwm' }]
+            : undefined,
+          capAdd: tailnetConfig ? ['NET_ADMIN', 'NET_RAW'] : undefined
         });
 
         const creating = this.boxes.update(box.id, {
           containerId,
-          status: 'creating'
+          status: 'creating',
+          tailnetUrl: tailnetHostname ? `ssh://${tailnetHostname}` : null
         });
         this.publishBox(creating);
 
-        ctx.setProgress(80, 'Starting container');
+        ctx.setProgress(60, 'Starting container');
         await this.runtime.startContainer(containerId);
+
+        // Capture Tailscale device identity from control plane.
+        if (tailnetConfig && this.tailscaleClient) {
+          if (!tailnetHostname) {
+            throw new ValidationError('Missing tailnet hostname for device capture.');
+          }
+          ctx.setProgress(75, 'Waiting for Tailscale device registration');
+          const device = await this.captureDeviceByHostname(tailnetConfig, tailnetHostname);
+          if (!device) {
+            throw new ValidationError(
+              `Timed out waiting for Tailscale device registration for hostname ${tailnetHostname}.`
+            );
+          }
+          this.boxes.update(box.id, { tailnetDeviceId: device.id });
+        }
 
         const running = this.boxes.update(box.id, {
           status: 'running'
@@ -223,6 +308,14 @@ export class DevboxOrchestrator {
         ctx.setProgress(50, 'Starting container');
         await this.assertManagedContainer(box.id, containerId);
         await this.runtime.startContainer(containerId);
+
+        // Refresh Tailscale device identity after restart.
+        if (this.tailnetConfigs?.get() && this.tailscaleClient) {
+          ctx.setProgress(75, 'Verifying stored Tailscale device identity');
+          if (!box.tailnetDeviceId) {
+            throw new ValidationError('Box is missing stored tailnet device ID.');
+          }
+        }
 
         const running = this.boxes.update(box.id, { status: 'running' });
         this.publishBox(running);
@@ -286,13 +379,16 @@ export class DevboxOrchestrator {
     this.jobRunner.enqueue(job.id, async (ctx) => {
       try {
         if (box.containerId) {
-          ctx.setProgress(20, 'Stopping container');
+          ctx.setProgress(15, 'Stopping container');
           await this.assertManagedContainer(box.id, box.containerId);
           await this.runtime.stopContainer(box.containerId);
 
-          ctx.setProgress(35, 'Removing container');
+          ctx.setProgress(30, 'Removing container');
           await this.runtime.removeContainer(box.containerId);
         }
+
+        ctx.setProgress(45, 'Cleaning up Tailnet device');
+        await this.cleanupTailnetDevice(box);
 
         ctx.setProgress(65, 'Removing network');
         await this.runtime.removeNetwork(box.networkName);
@@ -327,6 +423,93 @@ export class DevboxOrchestrator {
 
     await this.assertManagedContainer(box.id, box.containerId);
     return this.streamManagedBoxLogs(box.id, box.containerId, options);
+  }
+
+  // --- Private helpers ---
+
+  private async captureDeviceByHostname(
+    tailnetConfig: TailnetConfig,
+    hostname: string
+  ): Promise<TailscaleDevice | null> {
+    for (let attempt = 0; attempt <= DEVICE_CAPTURE_RETRY_DELAYS.length; attempt++) {
+      try {
+        const device = await this.tailscaleClient?.findDeviceByHostname(tailnetConfig, hostname);
+        if (device) {
+          return device;
+        }
+      } catch {
+        // Retry on next iteration
+      }
+
+      if (attempt === DEVICE_CAPTURE_RETRY_DELAYS.length) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, DEVICE_CAPTURE_RETRY_DELAYS[attempt]));
+    }
+    return null;
+  }
+
+  private async cleanupTailnetDevice(box: Box): Promise<void> {
+    const tailnetConfig = this.tailnetConfigs?.get() ?? null;
+    if (!tailnetConfig || !this.tailscaleClient) {
+      return;
+    }
+
+    if (!box.tailnetDeviceId) {
+      console.warn(
+        `[orchestrator] tailnet cleanup skipped for box ${box.id}: missing tailnetDeviceId`
+      );
+      return;
+    }
+
+    const cleanupPath = `deviceId:${box.tailnetDeviceId}`;
+    try {
+      await this.tailscaleClient.deleteDevice(tailnetConfig, box.tailnetDeviceId);
+    } catch (error) {
+      // Tailnet cleanup failure is a warning, not a fatal error.
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(
+        `[orchestrator] tailnet cleanup failed for box ${box.id} (${cleanupPath}): ${message}`
+      );
+    }
+  }
+
+  private async runCleanupJob(box: Box): Promise<void> {
+    if (this.cleanupInProgress.has(box.id)) {
+      return;
+    }
+    this.cleanupInProgress.add(box.id);
+
+    const job = this.jobs.create({
+      type: 'cleanup',
+      status: 'queued',
+      boxId: box.id,
+      progress: 0,
+      message: 'Cleanup after external deletion'
+    });
+    publishJob(this.events, job);
+
+    this.jobRunner.enqueue(job.id, async (ctx) => {
+      try {
+        ctx.setProgress(20, 'Cleaning up Tailnet device');
+        await this.cleanupTailnetDevice(box);
+
+        ctx.setProgress(50, 'Removing network');
+        try {
+          await this.runtime.removeNetwork(box.networkName);
+        } catch { /* best effort */ }
+
+        ctx.setProgress(75, 'Removing volume');
+        try {
+          await this.runtime.removeVolume(box.volumeName);
+        } catch { /* best effort */ }
+
+        this.boxes.delete(box.id);
+        this.publishBoxRemoved(box.id);
+      } finally {
+        this.cleanupInProgress.delete(box.id);
+      }
+    });
   }
 
   private async *streamManagedBoxLogs(
@@ -487,6 +670,11 @@ export class DevboxOrchestrator {
     }
 
     if (!details) {
+      // Container externally deleted - enqueue cleanup job instead of hard delete
+      if (emitUpdate && this.tailnetConfigs) {
+        await this.runCleanupJob(box);
+        return box;
+      }
       this.boxes.delete(box.id);
       if (emitUpdate) {
         this.publishBoxRemoved(box.id);

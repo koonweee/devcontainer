@@ -1,6 +1,8 @@
 # Devbox Platform
 
-Monorepo for a Docker-image-based dev box platform with strict privilege boundaries.
+> **Warning**: Web app authentication is not implemented yet. Implement OAuth login for the full web app before production deployment.
+
+Monorepo for a Docker-image-based dev box platform with strict privilege boundaries. Every dev box is a persistent Tailscale node with inbound traffic restricted to Tailnet only.
 
 ## Workspace components
 

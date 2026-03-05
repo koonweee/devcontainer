@@ -16,6 +16,10 @@ RUN apt-get update \
     | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
  && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
     > /etc/apt/sources.list.d/nodesource.list \
+ && curl -fsSL https://pkgs.tailscale.com/stable/debian/trixie.noarmor.gpg \
+    > /usr/share/keyrings/tailscale-archive-keyring.gpg \
+ && curl -fsSL https://pkgs.tailscale.com/stable/debian/trixie.tailscale-keyring.list \
+    > /etc/apt/sources.list.d/tailscale.list \
  && apt-get update \
  && apt-get install -y --no-install-recommends \
     vim \
@@ -32,13 +36,15 @@ RUN apt-get update \
     xz-utils \
     unzip \
     nodejs \
+    tailscale \
+    iptables \
  && npm install -g @openai/codex @google/gemini-cli@latest \
  && npm cache clean --force \
  && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --gid "${DEV_GID}" "${DEV_USER}" \
  && useradd --uid "${DEV_UID}" --gid "${DEV_GID}" --create-home --shell /usr/bin/zsh "${DEV_USER}" \
- && mkdir -p /workspace /var/run/sshd \
+ && mkdir -p /workspace /var/run/sshd /var/run/tailscale \
  && chown -R "${DEV_USER}:${DEV_USER}" /workspace \
  && echo "${DEV_USER} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/90-dev-user \
  && chmod 0440 /etc/sudoers.d/90-dev-user

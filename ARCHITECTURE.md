@@ -9,7 +9,8 @@ flowchart LR
   API --> ORCH["Orchestrator Library (packages/orchestrator)"]
   IMG["Runtime Image (docker/runtime/Dockerfile)"] --> ORCH
   ORCH --> DOCKER["Docker Engine (docker.sock)"]
-  API --> SQLITE["SQLite (job + box state)"]
+  API --> SQLITE["SQLite (job + box + tailnet config state)"]
+  ORCH --> TS["Tailscale API (control plane)"]
   WEB -. shared contract .-> CLIENT["OpenAPI Client (packages/api-client)"]
   CLI -. shared contract .-> CLIENT
   CLIENT --> API
@@ -31,9 +32,20 @@ flowchart LR
 - Web and CLI are unprivileged API consumers and never access Docker or DB directly.
 - API and web are deployed as separate containers/services.
 
+## Tailscale integration
+- Tailnet config (OAuth credentials, tags, hostname prefix) stored in single-row `tailnet_config` SQLite table.
+- Config is locked (409) while boxes exist to prevent credential drift.
+- Box creation: orchestrator mints a per-box Tailscale auth key (ephemeral: false, reusable: false, preauthorized: true), injects it as container env, and adds `/dev/net/tun` device + `NET_ADMIN`/`NET_RAW` capabilities.
+- Device capture: after container start, orchestrator polls Tailscale control plane by deterministic hostname with retry and persists `tailnetDeviceId`.
+- Box start: reuses persisted `tailnetDeviceId` (no in-container exec lookup).
+- Box removal: Tailnet device deleted by persisted device ID. Cleanup errors are warnings, not fatal.
+- External container deletion: reconciliation enqueues a cleanup job (Tailnet device + network + volume + DB row) instead of hard-deleting immediately.
+- Runtime entrypoint (`docker/runtime/dev-entrypoint.sh`): uses fixed state dir (`/workspace/.tailscale`), authenticates with authkey on first boot, reconnects from persisted state on restart, and applies iptables firewall (allow lo + established + tailscale0, drop rest).
+
 ## Runtime network model
 - Each created box is assigned a dedicated Docker network (`devbox-net-<boxId>`) by the orchestrator and attached to that network as its container `NetworkMode`.
 - Boxes are therefore isolated from each other by default at the Docker-network level (no shared box network).
+- Inbound traffic to each box is restricted to Tailnet only via iptables rules in the container entrypoint.
 - Caveat: these per-box networks use Docker bridge defaults (not `internal` and no egress policy), so outbound connectivity is still available from each box subject to host/Docker routing and firewall policy.
 
 ## Key references

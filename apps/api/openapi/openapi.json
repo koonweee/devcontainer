@@ -17,6 +17,7 @@
           "networkName",
           "volumeName",
           "tailnetUrl",
+          "tailnetDeviceId",
           "createdAt",
           "updatedAt"
         ],
@@ -93,6 +94,16 @@
             "type": "string"
           },
           "tailnetUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tailnetDeviceId": {
             "anyOf": [
               {
                 "type": "string"
@@ -254,6 +265,46 @@
           }
         },
         "title": "Job"
+      },
+      "def-2": {
+        "type": "object",
+        "required": [
+          "tailnet",
+          "oauthClientId",
+          "oauthClientSecret",
+          "tagsCsv",
+          "hostnamePrefix",
+          "authkeyExpirySeconds",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "tailnet": {
+            "type": "string"
+          },
+          "oauthClientId": {
+            "type": "string"
+          },
+          "oauthClientSecret": {
+            "type": "string"
+          },
+          "tagsCsv": {
+            "type": "string"
+          },
+          "hostnamePrefix": {
+            "type": "string"
+          },
+          "authkeyExpirySeconds": {
+            "type": "number"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "title": "TailnetConfig"
       }
     }
   },
@@ -531,6 +582,80 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/v1/tailnet/config": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/def-2"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                  "tailnet",
+                  "oauthClientId",
+                  "oauthClientSecret"
+                ],
+                "properties": {
+                  "tailnet": {
+                    "type": "string"
+                  },
+                  "oauthClientId": {
+                    "type": "string"
+                  },
+                  "oauthClientSecret": {
+                    "type": "string"
+                  },
+                  "tagsCsv": {
+                    "type": "string"
+                  },
+                  "hostnamePrefix": {
+                    "type": "string"
+                  },
+                  "authkeyExpirySeconds": {
+                    "minimum": 60,
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/def-2"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "Default Response"
           }
         }
       }

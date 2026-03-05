@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 
-import type { Box, Job, JobFilter, JobStatus, JobType } from './types.js';
+import type { Box, Job, JobFilter, JobStatus, JobType, TailnetConfig, TailnetConfigInput } from './types.js';
 
 export interface BoxCreate {
   id?: string;
@@ -12,6 +12,7 @@ export interface BoxCreate {
   networkName: string;
   volumeName: string;
   tailnetUrl?: string | null;
+  tailnetDeviceId?: string | null;
 }
 
 export interface JobCreate {
@@ -31,6 +32,13 @@ export interface BoxRepository {
   get(boxId: string): Box | null;
   getByName(name: string): Box | null;
   delete(boxId: string): void;
+  count(): number;
+}
+
+export interface TailnetConfigRepository {
+  get(): TailnetConfig | null;
+  set(input: TailnetConfigInput): TailnetConfig;
+  delete(): void;
 }
 
 export interface JobRepository {
@@ -54,6 +62,20 @@ function mapBox(row: Record<string, unknown>): Box {
     networkName: String(row.network_name),
     volumeName: String(row.volume_name),
     tailnetUrl: (row.tailnet_url as string | null) ?? null,
+    tailnetDeviceId: (row.tailnet_device_id as string | null) ?? null,
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at)
+  };
+}
+
+function mapTailnetConfig(row: Record<string, unknown>): TailnetConfig {
+  return {
+    tailnet: String(row.tailnet),
+    oauthClientId: String(row.oauth_client_id),
+    oauthClientSecret: String(row.oauth_client_secret),
+    tagsCsv: String(row.tags_csv),
+    hostnamePrefix: String(row.hostname_prefix),
+    authkeyExpirySeconds: Number(row.authkey_expiry_seconds),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at)
   };
@@ -83,6 +105,7 @@ const BOXES_COLUMNS_SQL = `
   network_name TEXT NOT NULL,
   volume_name TEXT NOT NULL,
   tailnet_url TEXT,
+  tailnet_device_id TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 `;
@@ -108,6 +131,20 @@ const CREATE_JOBS_TABLE_SQL = `
   );
 `;
 
+const CREATE_TAILNET_CONFIG_TABLE_SQL = `
+  CREATE TABLE IF NOT EXISTS tailnet_config (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    tailnet TEXT NOT NULL,
+    oauth_client_id TEXT NOT NULL,
+    oauth_client_secret TEXT NOT NULL,
+    tags_csv TEXT NOT NULL DEFAULT 'tag:devcontainer',
+    hostname_prefix TEXT NOT NULL DEFAULT 'devbox',
+    authkey_expiry_seconds INTEGER NOT NULL DEFAULT 600,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+`;
+
 const CREATE_NAME_UNIQUE_INDEX_SQL = `
   CREATE UNIQUE INDEX IF NOT EXISTS boxes_name_unique
   ON boxes(name);
@@ -127,6 +164,11 @@ function hasDeletedAtColumn(db: DatabaseSync): boolean {
 
   const columns = db.prepare("PRAGMA table_info('boxes')").all() as Array<{ name?: unknown }>;
   return columns.some((column) => column.name === 'deleted_at');
+}
+
+function hasColumn(db: DatabaseSync, table: string, column: string): boolean {
+  const columns = db.prepare(`PRAGMA table_info('${table}')`).all() as Array<{ name?: unknown }>;
+  return columns.some((c) => c.name === column);
 }
 
 function resetBoxesTableForHardDeletes(db: DatabaseSync): void {
@@ -150,7 +192,12 @@ export function initializeSchema(db: DatabaseSync): void {
     db.exec(CREATE_BOXES_TABLE_SQL);
   }
 
+  if (hasBoxesTable(db) && !hasColumn(db, 'boxes', 'tailnet_device_id')) {
+    db.exec('ALTER TABLE boxes ADD COLUMN tailnet_device_id TEXT');
+  }
+
   db.exec(CREATE_NAME_UNIQUE_INDEX_SQL);
+  db.exec(CREATE_TAILNET_CONFIG_TABLE_SQL);
 }
 
 /** Persists box records in SQLite with minimal query logic. */
@@ -163,8 +210,8 @@ export class SqliteBoxRepository implements BoxRepository {
     this.db
       .prepare(
         `
-      INSERT INTO boxes (id, name, image, status, container_id, network_name, volume_name, tailnet_url, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO boxes (id, name, image, status, container_id, network_name, volume_name, tailnet_url, tailnet_device_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
       )
       .run(
@@ -176,6 +223,7 @@ export class SqliteBoxRepository implements BoxRepository {
         input.networkName,
         input.volumeName,
         input.tailnetUrl ?? null,
+        input.tailnetDeviceId ?? null,
         timestamp,
         timestamp
       );
@@ -195,7 +243,7 @@ export class SqliteBoxRepository implements BoxRepository {
       .prepare(
         `
       UPDATE boxes
-      SET name = ?, image = ?, status = ?, container_id = ?, network_name = ?, volume_name = ?, tailnet_url = ?, updated_at = ?
+      SET name = ?, image = ?, status = ?, container_id = ?, network_name = ?, volume_name = ?, tailnet_url = ?, tailnet_device_id = ?, updated_at = ?
       WHERE id = ?
       `
       )
@@ -207,6 +255,7 @@ export class SqliteBoxRepository implements BoxRepository {
         updated.networkName,
         updated.volumeName,
         updated.tailnetUrl,
+        updated.tailnetDeviceId,
         updated.updatedAt,
         boxId
       );
@@ -238,6 +287,11 @@ export class SqliteBoxRepository implements BoxRepository {
 
   delete(boxId: string): void {
     this.db.prepare('DELETE FROM boxes WHERE id = ?').run(boxId);
+  }
+
+  count(): number {
+    const row = this.db.prepare('SELECT COUNT(*) as cnt FROM boxes').get() as { cnt: number };
+    return Number(row.cnt);
   }
 
   private getRequired(boxId: string): Box {
@@ -338,10 +392,63 @@ export class SqliteJobRepository implements JobRepository {
   }
 }
 
+/** Persists tailnet credentials in a single-row SQLite table. */
+export class SqliteTailnetConfigRepository implements TailnetConfigRepository {
+  constructor(private readonly db: DatabaseSync) {}
+
+  get(): TailnetConfig | null {
+    const row = this.db.prepare('SELECT * FROM tailnet_config WHERE id = 1').get() as
+      | Record<string, unknown>
+      | undefined;
+    return row ? mapTailnetConfig(row) : null;
+  }
+
+  set(input: TailnetConfigInput): TailnetConfig {
+    const timestamp = nowIso();
+    const existing = this.get();
+    if (existing) {
+      this.db
+        .prepare(
+          `UPDATE tailnet_config SET tailnet = ?, oauth_client_id = ?, oauth_client_secret = ?, tags_csv = ?, hostname_prefix = ?, authkey_expiry_seconds = ?, updated_at = ? WHERE id = 1`
+        )
+        .run(
+          input.tailnet,
+          input.oauthClientId,
+          input.oauthClientSecret,
+          input.tagsCsv ?? 'tag:devcontainer',
+          input.hostnamePrefix ?? 'devbox',
+          input.authkeyExpirySeconds ?? 600,
+          timestamp
+        );
+    } else {
+      this.db
+        .prepare(
+          `INSERT INTO tailnet_config (id, tailnet, oauth_client_id, oauth_client_secret, tags_csv, hostname_prefix, authkey_expiry_seconds, created_at, updated_at) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          input.tailnet,
+          input.oauthClientId,
+          input.oauthClientSecret,
+          input.tagsCsv ?? 'tag:devcontainer',
+          input.hostnamePrefix ?? 'devbox',
+          input.authkeyExpirySeconds ?? 600,
+          timestamp,
+          timestamp
+        );
+    }
+    return this.get()!;
+  }
+
+  delete(): void {
+    this.db.prepare('DELETE FROM tailnet_config WHERE id = 1').run();
+  }
+}
+
 export function createSqliteRepositories(dbPath: string): {
   db: DatabaseSync;
   boxes: SqliteBoxRepository;
   jobs: SqliteJobRepository;
+  tailnetConfig: SqliteTailnetConfigRepository;
 } {
   const db = new DatabaseSync(dbPath);
   db.exec('PRAGMA journal_mode = WAL');
@@ -349,6 +456,7 @@ export function createSqliteRepositories(dbPath: string): {
   return {
     db,
     boxes: new SqliteBoxRepository(db),
-    jobs: new SqliteJobRepository(db)
+    jobs: new SqliteJobRepository(db),
+    tailnetConfig: new SqliteTailnetConfigRepository(db)
   };
 }

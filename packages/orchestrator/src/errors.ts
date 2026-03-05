@@ -21,3 +21,22 @@ export class SecurityError extends Error {
     this.name = 'SecurityError';
   }
 }
+
+/** Indicates config cannot be changed while boxes exist. */
+export class ConfigLockedError extends Error {
+  readonly boxCount: number;
+
+  constructor(message: string, boxCount: number) {
+    super(message);
+    this.name = 'ConfigLockedError';
+    this.boxCount = boxCount;
+  }
+}
+
+/** Indicates required setup has not been completed. */
+export class SetupRequiredError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SetupRequiredError';
+  }
+}

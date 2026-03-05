@@ -23,6 +23,12 @@ export interface ContainerDetails {
   status: ContainerRuntimeStatus;
 }
 
+export interface ContainerDevice {
+  PathOnHost: string;
+  PathInContainer: string;
+  CgroupPermissions: string;
+}
+
 export interface CreateContainerOptions {
   name: string;
   image: string;
@@ -31,6 +37,8 @@ export interface CreateContainerOptions {
   labels: Record<string, string>;
   env?: Record<string, string>;
   command?: string[];
+  devices?: ContainerDevice[];
+  capAdd?: string[];
 }
 
 export interface RuntimeLogLine {

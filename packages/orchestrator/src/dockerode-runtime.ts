@@ -177,22 +177,30 @@ export class DockerodeRuntime implements DockerRuntime {
   async createContainer(options: CreateContainerOptions): Promise<string> {
     await this.ensureImageInstalled(options.image);
 
+    const hostConfig: Record<string, unknown> = {
+      Mounts: [
+        {
+          Type: 'volume',
+          Source: options.volumeName,
+          Target: '/workspace'
+        }
+      ],
+      NetworkMode: options.networkName
+    };
+    if (options.devices?.length) {
+      hostConfig.Devices = options.devices;
+    }
+    if (options.capAdd?.length) {
+      hostConfig.CapAdd = options.capAdd;
+    }
+
     const container = await this.docker.createContainer({
       name: options.name,
       Image: options.image,
       Cmd: options.command,
       Env: Object.entries(options.env ?? {}).map(([key, value]) => `${key}=${value}`),
       Labels: options.labels,
-      HostConfig: {
-        Mounts: [
-          {
-            Type: 'volume',
-            Source: options.volumeName,
-            Target: '/workspace'
-          }
-        ],
-        NetworkMode: options.networkName
-      }
+      HostConfig: hostConfig
     });
     return container.id;
   }
