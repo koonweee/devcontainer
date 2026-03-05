@@ -5,13 +5,14 @@
 3. Review env defaults: `ENV.md` and `.env.example`.
 4. Generate contracts: `npm run gen:client`.
 5. Start stack: `docker compose up --build`.
-6. Optional local app-only runs: `npm run -w @devbox/api dev` and `npm run -w @devbox/web dev`.
-7. Verify changes: `npm run typecheck && npm run test`.
-8. Match CI locally before opening a PR: `npm run lint && npm run test && npm run build && npm run check:client`.
+6. Compose runs only `api` and `web`; API persists state in SQLite (`DEVBOX_DB_PATH`, default `/data/devbox.sqlite`).
+7. Optional local app-only runs: `npm run -w @devbox/api dev` and `npm run -w @devbox/web dev`.
+8. Verify changes: `npm run typecheck && npm run test`.
+9. Match CI locally before opening a PR: `npm run lint && npm run test && npm run build && npm run check:client`.
 
 ### For deployment
 1. Configure runtime values in `ENV.md` (usually `DEVBOX_PUBLIC_API_URL`, `DEVBOX_INTERNAL_API_URL`, `DEVBOX_API_URL`, `DEVBOX_DB_PATH`).
-2. Build and start services with your target orchestrator or Compose profile.
+2. Build and start services with your target orchestrator or Compose profile (`api` + `web`) and mount persistent storage for `DEVBOX_DB_PATH`.
 3. Ensure API container can access `/var/run/docker.sock`; do not grant that mount to web/CLI.
 4. Run post-deploy checks: `npm run gen:client`, `npm run typecheck`, and API health checks.
 

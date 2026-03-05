@@ -25,16 +25,5 @@ services:
       - "4173:4173"
     restart: unless-stopped
 
-  db:
-    image: postgres:17-alpine
-    environment:
-      POSTGRES_USER: devbox
-      POSTGRES_PASSWORD: devbox
-      POSTGRES_DB: devbox
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    restart: unless-stopped
-
 volumes:
   devbox-data:
-  postgres-data:
