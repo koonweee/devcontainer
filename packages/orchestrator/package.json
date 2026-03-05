@@ -9,9 +9,10 @@
     "./events": "./src/events.ts",
     "./factory": "./src/factory.ts",
     "./dockerode-runtime": "./src/dockerode-runtime.ts",
-    "./in-memory-repositories": "./src/in-memory-repositories.ts",
+    "./testing": "./src/testing/index.ts",
+    "./testing/in-memory-repositories": "./src/testing/in-memory-repositories.ts",
+    "./testing/mock-runtime": "./src/testing/mock-runtime.ts",
     "./job-runner": "./src/job-runner.ts",
-    "./mock-runtime": "./src/mock-runtime.ts",
     "./orchestrator": "./src/orchestrator.ts",
     "./types": "./src/types.ts",
     "./validation": "./src/validation.ts"

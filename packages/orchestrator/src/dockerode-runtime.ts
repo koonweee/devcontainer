@@ -46,6 +46,7 @@ function parseLogLine(line: string): { timestamp: string; message: string } | nu
   };
 }
 
+/** Executes Docker operations through Docker Engine API via dockerode. */
 export class DockerodeRuntime implements DockerRuntime {
   private readonly docker: Dockerode;
 

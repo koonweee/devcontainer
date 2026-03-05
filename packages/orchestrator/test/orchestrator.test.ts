@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { OrchestratorEvents } from '../src/events.js';
-import { InMemoryBoxRepository, InMemoryJobRepository } from '../src/in-memory-repositories.js';
 import { JobRunner } from '../src/job-runner.js';
-import { MockDockerRuntime } from '../src/mock-runtime.js';
 import { DevboxOrchestrator } from '../src/orchestrator.js';
 import { ValidationError } from '../src/errors.js';
+import { InMemoryBoxRepository, InMemoryJobRepository } from '../src/testing/in-memory-repositories.js';
+import { MockDockerRuntime } from '../src/testing/mock-runtime.js';
 
 async function waitForJob(
   orchestrator: DevboxOrchestrator,

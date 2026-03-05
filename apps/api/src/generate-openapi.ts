@@ -1,9 +1,11 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { buildApp, buildInMemoryOrchestrator } from './app.js';
+import { createOrchestrator } from '@devbox/orchestrator/factory';
 
-const app = await buildApp({ orchestrator: buildInMemoryOrchestrator() });
+import { buildApp } from './app.js';
+
+const app = await buildApp({ orchestrator: createOrchestrator({ dbPath: ':memory:' }) });
 await app.ready();
 
 const outputPath = path.resolve(process.cwd(), 'openapi/openapi.json');

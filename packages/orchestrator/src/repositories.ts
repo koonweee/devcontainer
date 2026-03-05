@@ -105,6 +105,7 @@ export function initializeSchema(db: DatabaseSync): void {
   `);
 }
 
+/** Persists box records in SQLite with minimal query logic. */
 export class SqliteBoxRepository implements BoxRepository {
   constructor(private readonly db: DatabaseSync) {}
 
@@ -198,6 +199,7 @@ export class SqliteBoxRepository implements BoxRepository {
   }
 }
 
+/** Persists job records in SQLite for queue and status tracking. */
 export class SqliteJobRepository implements JobRepository {
   constructor(private readonly db: DatabaseSync) {}
 

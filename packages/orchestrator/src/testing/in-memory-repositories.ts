@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto';
 
-import type { Box, BoxFilter, Job, JobFilter } from './types.js';
-import type { BoxCreate, BoxRepository, JobCreate, JobRepository } from './repositories.js';
+import type { Box, BoxFilter, Job, JobFilter } from '../types.js';
+import type { BoxCreate, BoxRepository, JobCreate, JobRepository } from '../repositories.js';
 
 function now(): string {
   return new Date().toISOString();
 }
 
+/** Stores box state in memory for fast tests. */
 export class InMemoryBoxRepository implements BoxRepository {
   private readonly boxes = new Map<string, Box>();
 
@@ -61,6 +62,7 @@ export class InMemoryBoxRepository implements BoxRepository {
   }
 }
 
+/** Stores job state in memory for deterministic tests. */
 export class InMemoryJobRepository implements JobRepository {
   private readonly jobs = new Map<string, Job>();
 

@@ -3,16 +3,8 @@ import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from
 import swagger from '@fastify/swagger';
 import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import { Type } from '@sinclair/typebox';
-import {
-  InMemoryBoxRepository
-} from '@devbox/orchestrator/in-memory-repositories';
-import { InMemoryJobRepository } from '@devbox/orchestrator/in-memory-repositories';
-import { JobRunner } from '@devbox/orchestrator/job-runner';
-import { MockDockerRuntime } from '@devbox/orchestrator/mock-runtime';
 import type { DevboxOrchestrator } from '@devbox/orchestrator/orchestrator';
-import { DevboxOrchestrator as OrchestratorClass } from '@devbox/orchestrator/orchestrator';
 import { NotFoundError, SecurityError, ValidationError } from '@devbox/orchestrator/errors';
-import { OrchestratorEvents } from '@devbox/orchestrator/events';
 
 import {
   BoxIdParamsSchema,
@@ -53,15 +45,6 @@ function attachErrorMapping(app: FastifyInstance): void {
 
     reply.status(500).send({ message: 'Internal server error' });
   });
-}
-
-export function buildInMemoryOrchestrator(): DevboxOrchestrator {
-  const events = new OrchestratorEvents();
-  const jobs = new InMemoryJobRepository();
-  const boxes = new InMemoryBoxRepository();
-  const runner = new JobRunner(jobs, events);
-  const runtime = new MockDockerRuntime();
-  return new OrchestratorClass(runtime, boxes, jobs, runner, events);
 }
 
 export async function buildApp(options?: BuildAppOptions) {

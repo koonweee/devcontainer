@@ -4,7 +4,7 @@ import type {
   DockerRuntime,
   RuntimeLogLine,
   RuntimeLogOptions
-} from './runtime.js';
+} from '../runtime.js';
 
 interface FakeContainer {
   id: string;
@@ -12,6 +12,7 @@ interface FakeContainer {
   logs: RuntimeLogLine[];
 }
 
+/** Simulates Docker runtime behavior without touching Docker Engine. */
 export class MockDockerRuntime implements DockerRuntime {
   readonly networks = new Set<string>();
   readonly volumes = new Set<string>();

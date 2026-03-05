@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildApp, buildInMemoryOrchestrator } from '../src/app.js';
+import { buildApp } from '../src/app.js';
+import { buildInMemoryOrchestrator } from './support/orchestrator.js';
 
 async function waitForTerminalJob(app: Awaited<ReturnType<typeof buildApp>>, jobId: string): Promise<void> {
   const deadline = Date.now() + 2000;

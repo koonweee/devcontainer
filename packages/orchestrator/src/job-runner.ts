@@ -17,6 +17,7 @@ function timestamp(): string {
   return new Date().toISOString();
 }
 
+/** Runs queued orchestration jobs and publishes state transitions. */
 export class JobRunner {
   private readonly queue: QueueItem[] = [];
   private processing = false;

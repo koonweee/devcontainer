@@ -7,6 +7,7 @@ type EventPayload<T extends EventType> = OrchestratorEventMap[T];
 
 type Listener = (event: OrchestratorEventMap[EventType]) => void;
 
+/** Broadcasts box and job lifecycle events to API subscribers. */
 export class OrchestratorEvents {
   private readonly emitter = new EventEmitter();
 

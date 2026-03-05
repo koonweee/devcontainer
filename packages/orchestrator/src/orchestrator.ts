@@ -29,6 +29,7 @@ function containerName(boxId: string): string {
   return `devbox-${boxId}`;
 }
 
+/** Coordinates box lifecycle operations, jobs, logs, and security checks. */
 export class DevboxOrchestrator {
   constructor(
     private readonly runtime: DockerRuntime,
