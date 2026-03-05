@@ -5,12 +5,22 @@
 
   import LogTerminal from '$lib/LogTerminal.svelte';
   import { createDevboxStore } from '$lib/devbox-store';
+  import { cn } from '$lib/utils';
+
+  import { Button } from '$lib/components/ui/button';
+  import { Badge } from '$lib/components/ui/badge';
+  import * as Card from '$lib/components/ui/card';
+  import * as Alert from '$lib/components/ui/alert';
+  import * as Dialog from '$lib/components/ui/dialog';
+  import { Input } from '$lib/components/ui/input';
+  import { Separator } from '$lib/components/ui/separator';
 
   export let data: { initialBoxes: Box[]; apiUrl: string };
 
   const store = createDevboxStore(data.initialBoxes, data.apiUrl);
 
   let name = '';
+  let confirmRemoveId: string | null = null;
 
   $: activeViewer = $store.activeLogTab ? $store.logViewers[$store.activeLogTab] : null;
 
@@ -35,247 +45,265 @@
     const box = $store.boxes.find((item) => item.id === boxId);
     return box?.name ?? boxId;
   }
+
+  function statusVariant(status: Box['status']): string {
+    switch (status) {
+      case 'running':
+        return 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30';
+      case 'stopped':
+        return 'bg-zinc-500/15 text-zinc-400 border-zinc-500/30';
+      case 'creating':
+      case 'starting':
+      case 'stopping':
+      case 'removing':
+        return 'bg-amber-500/15 text-amber-400 border-amber-500/30';
+      case 'error':
+        return 'bg-red-500/15 text-red-400 border-red-500/30';
+      default:
+        return 'bg-zinc-500/15 text-zinc-400 border-zinc-500/30';
+    }
+  }
+
+  function truncateImage(image: string): string {
+    if (image.length <= 40) return image;
+    return image.slice(0, 37) + '...';
+  }
+
+  function handleRemove(boxId: string): void {
+    confirmRemoveId = boxId;
+  }
+
+  async function confirmRemove(): Promise<void> {
+    if (confirmRemoveId) {
+      await store.remove(confirmRemoveId);
+      confirmRemoveId = null;
+    }
+  }
 </script>
 
-<main>
-  <h1>Dev Boxes</h1>
-
-  <form onsubmit={createBox}>
-    <label>
-      Name
-      <input bind:value={name} minlength="3" maxlength="63" required placeholder="my-devbox" />
-    </label>
-
-    <button type="submit">Create</button>
-  </form>
-
-  {#if $store.error}
-    <p class="global-error">{$store.error}</p>
-  {/if}
-
-  <ul>
-    {#each $store.boxes as box (box.id)}
-      <li>
-        <strong>{box.name}</strong>
-        <span>{box.image}</span>
-        <span>{box.status}</span>
-        {#if box.status === 'running'}
-          <button onclick={() => store.stop(box.id)}>Stop</button>
-        {:else if box.status === 'stopped'}
-          <button onclick={() => store.start(box.id)}>Start</button>
-        {:else}
-          <span></span>
+<!-- Header -->
+<div class="min-h-screen">
+  <header class="sticky top-0 z-10 border-b border-border bg-background/80 backdrop-blur-md">
+    <div class="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
+      <div class="flex items-center gap-3">
+        <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/15">
+          <svg class="h-4 w-4 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="6" width="20" height="12" rx="2" />
+            <path d="M12 12h.01" />
+            <path d="M17 12h.01" />
+            <path d="M7 12h.01" />
+          </svg>
+        </div>
+        <h1 class="text-base font-semibold tracking-tight">Dev Boxes</h1>
+        {#if $store.boxes.length > 0}
+          <span class="rounded-md bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">{$store.boxes.length}</span>
         {/if}
-        <button onclick={() => store.remove(box.id)}>Remove</button>
-        <button onclick={() => store.openLogs(box.id)}>View logs</button>
-      </li>
-    {/each}
-  </ul>
-
-  {#if $store.openLogTabs.length > 0}
-    <section class="logs">
-      <div class="tabs" role="tablist" aria-label="Log tabs">
-        {#each $store.openLogTabs as tabId (tabId)}
-          <div class="tab">
-            <button
-              class="tab-button"
-              class:active={$store.activeLogTab === tabId}
-              onclick={() => store.setActiveLogTab(tabId)}
-              role="tab"
-              aria-selected={$store.activeLogTab === tabId}
-              type="button"
-            >
-              {boxLabel(tabId)}
-            </button>
-            <button class="tab-close" onclick={() => store.closeLogs(tabId)} type="button">Close</button>
-          </div>
-        {/each}
       </div>
 
-      {#if activeViewer}
-        <div class="log-controls">
-          <label class="follow-toggle">
-            <input
-              type="checkbox"
-              checked={activeViewer.follow}
-              onchange={(event) =>
-                store.setLogFollow(activeViewer.boxId, (event.currentTarget as HTMLInputElement).checked)}
-            />
-            Follow
-          </label>
-          <button type="button" onclick={() => store.clearLogs(activeViewer.boxId)}>Clear</button>
-          <span class="status">Status: {activeViewer.status}</span>
-          {#if activeViewer.error}
-            <span class="log-error">{activeViewer.error}</span>
-          {/if}
+      <form onsubmit={createBox} class="flex items-center gap-2">
+        <Input
+          bind:value={name}
+          minlength={3}
+          maxlength={63}
+          required
+          placeholder="box-name"
+          class="h-8 w-44 bg-muted/50 font-mono text-sm placeholder:text-muted-foreground/50"
+        />
+        <Button type="submit" variant="outline" size="sm" class="h-8 border-primary/40 text-primary hover:bg-primary/10 hover:text-primary">
+          Create
+        </Button>
+      </form>
+    </div>
+  </header>
+
+  <main class="mx-auto max-w-5xl px-4 py-4">
+    <!-- Error Alert -->
+    {#if $store.error}
+      <Alert.Root variant="destructive" class="mb-4 border-destructive/30 bg-destructive/10">
+        <Alert.Description class="flex items-center justify-between text-sm">
+          <span>{$store.error}</span>
+          <button
+            class="ml-4 text-xs text-destructive/70 hover:text-destructive"
+            onclick={() => { /* error will clear on next successful action */ }}
+          >
+            Dismiss
+          </button>
+        </Alert.Description>
+      </Alert.Root>
+    {/if}
+
+    <!-- Box List -->
+    {#if $store.boxes.length === 0}
+      <div class="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-16 text-center">
+        <div class="mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-muted">
+          <svg class="h-6 w-6 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="6" width="20" height="12" rx="2" />
+            <path d="M12 12h.01" />
+          </svg>
+        </div>
+        <p class="text-sm text-muted-foreground">No dev boxes yet</p>
+        <p class="mt-1 text-xs text-muted-foreground/60">Create one using the form above</p>
+      </div>
+    {:else}
+      <div class="space-y-1.5">
+        {#each $store.boxes as box (box.id)}
+          <Card.Root class="border-border bg-card/60 transition-colors hover:bg-card/80">
+            <div class="flex items-center gap-3 px-4 py-2.5">
+              <!-- Status dot -->
+              <div class={cn(
+                'h-2 w-2 shrink-0 rounded-full',
+                box.status === 'running' ? 'bg-cyan-400 shadow-[0_0_6px_theme(--color-primary)]' :
+                box.status === 'error' ? 'bg-red-400' :
+                ['creating', 'starting', 'stopping', 'removing'].includes(box.status) ? 'bg-amber-400 animate-pulse' :
+                'bg-zinc-500'
+              )}></div>
+
+              <!-- Name -->
+              <span class="min-w-0 flex-shrink-0 truncate font-mono text-sm font-medium text-foreground">
+                {box.name}
+              </span>
+
+              <!-- Image -->
+              <span class="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground" title={box.image}>
+                {truncateImage(box.image)}
+              </span>
+
+              <!-- Status Badge -->
+              <Badge variant="outline" class={cn('shrink-0 border px-2 py-0 text-[0.65rem] font-medium uppercase tracking-wider', statusVariant(box.status))}>
+                {box.status}
+              </Badge>
+
+              <!-- Actions -->
+              <div class="flex shrink-0 items-center gap-1">
+                {#if box.status === 'running'}
+                  <Button variant="ghost" size="icon-sm" onclick={() => store.stop(box.id)} class="h-7 w-7 text-muted-foreground hover:text-foreground" title="Stop">
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1" /></svg>
+                  </Button>
+                {:else if box.status === 'stopped'}
+                  <Button variant="ghost" size="icon-sm" onclick={() => store.start(box.id)} class="h-7 w-7 text-muted-foreground hover:text-primary" title="Start">
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v14l11-7-11-7z" /></svg>
+                  </Button>
+                {:else}
+                  <div class="h-7 w-7"></div>
+                {/if}
+
+                <Button variant="ghost" size="icon-sm" onclick={() => store.openLogs(box.id)} class="h-7 w-7 text-muted-foreground hover:text-foreground" title="View logs">
+                  <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M13 4v16" /><path d="M17 4v16" /><path d="M19 4H9.5a4.5 4.5 0 0 0 0 9H13" />
+                  </svg>
+                </Button>
+
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onclick={() => handleRemove(box.id)}
+                  class="h-7 w-7 text-muted-foreground hover:text-destructive"
+                  title="Remove"
+                  disabled={['creating', 'removing'].includes(box.status)}
+                >
+                  <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                  </svg>
+                </Button>
+              </div>
+            </div>
+          </Card.Root>
+        {/each}
+      </div>
+    {/if}
+
+    <!-- Log Viewer -->
+    {#if $store.openLogTabs.length > 0}
+      <Separator class="my-4 bg-border" />
+
+      <Card.Root class="overflow-hidden border-border bg-card/60">
+        <!-- Tab bar -->
+        <div class="flex items-center gap-0.5 overflow-x-auto border-b border-border bg-muted/30 px-2 pt-1.5">
+          {#each $store.openLogTabs as tabId (tabId)}
+            <div class={cn(
+              'group relative flex items-center rounded-t-md text-xs font-medium transition-colors',
+              $store.activeLogTab === tabId
+                ? 'bg-card text-foreground'
+                : 'text-muted-foreground hover:text-foreground/80'
+            )}>
+              {#if $store.activeLogTab === tabId}
+                <div class="absolute inset-x-0 bottom-0 h-px bg-primary"></div>
+              {/if}
+              <button
+                class="px-3 py-1.5 font-mono"
+                onclick={() => store.setActiveLogTab(tabId)}
+                type="button"
+              >
+                {boxLabel(tabId)}
+              </button>
+              <button
+                class="mr-1 rounded p-0.5 text-muted-foreground/50 hover:bg-muted hover:text-foreground"
+                onclick={() => store.closeLogs(tabId)}
+                type="button"
+                title="Close tab"
+              >
+                <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+              </button>
+            </div>
+          {/each}
         </div>
 
-        <LogTerminal lines={activeViewer.lines} />
-      {/if}
-    </section>
-  {/if}
-</main>
+        <!-- Log controls + terminal -->
+        {#if activeViewer}
+          <div class="flex items-center gap-3 border-b border-border px-3 py-1.5">
+            <label class="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={activeViewer.follow}
+                onchange={(event) =>
+                  store.setLogFollow(activeViewer.boxId, (event.currentTarget as HTMLInputElement).checked)}
+                class="accent-primary"
+              />
+              Follow
+            </label>
+            <Button variant="ghost" size="sm" onclick={() => store.clearLogs(activeViewer.boxId)} class="h-6 px-2 text-xs text-muted-foreground hover:text-foreground">
+              Clear
+            </Button>
 
-<style>
-  :global(body) {
-    margin: 0;
-    font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
-    background: linear-gradient(165deg, #f5f7ea 0%, #dce8ef 100%);
-    color: #0f1b2d;
-  }
+            <div class="flex-1"></div>
 
-  main {
-    max-width: 980px;
-    margin: 0 auto;
-    padding: 2rem 1rem 3rem;
-  }
+            <div class="flex items-center gap-1.5">
+              <div class={cn(
+                'h-1.5 w-1.5 rounded-full',
+                activeViewer.status === 'streaming' ? 'bg-cyan-400 animate-pulse' :
+                activeViewer.status === 'connecting' ? 'bg-amber-400 animate-pulse' :
+                activeViewer.status === 'error' ? 'bg-red-400' :
+                'bg-zinc-500'
+              )}></div>
+              <span class="font-mono text-[0.65rem] uppercase tracking-wider text-muted-foreground">{activeViewer.status}</span>
+            </div>
 
-  h1 {
-    margin: 0 0 1rem;
-    font-size: 2rem;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-  }
+            {#if activeViewer.error}
+              <span class="text-xs text-destructive">{activeViewer.error}</span>
+            {/if}
+          </div>
 
-  form {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 0.8rem;
-    align-items: end;
-    margin-bottom: 1.25rem;
-    background: #ffffffcc;
-    border: 1px solid #1f3b4d33;
-    padding: 0.85rem;
-    border-radius: 0.6rem;
-  }
+          <div class="p-2">
+            <LogTerminal lines={activeViewer.lines} />
+          </div>
+        {/if}
+      </Card.Root>
+    {/if}
+  </main>
+</div>
 
-  label {
-    display: grid;
-    gap: 0.35rem;
-    font-size: 0.9rem;
-  }
-
-  input {
-    border: 1px solid #2d4f6150;
-    border-radius: 0.5rem;
-    padding: 0.55rem 0.65rem;
-    font-size: 0.95rem;
-  }
-
-  button {
-    border: none;
-    border-radius: 0.45rem;
-    padding: 0.55rem 0.9rem;
-    font-weight: 600;
-    cursor: pointer;
-    background: #153f70;
-    color: white;
-  }
-
-  button:disabled {
-    cursor: not-allowed;
-    opacity: 0.55;
-  }
-
-  .global-error,
-  .log-error {
-    color: #8d1f1f;
-    font-weight: 600;
-  }
-
-  ul {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: grid;
-    gap: 0.65rem;
-  }
-
-  li {
-    display: grid;
-    grid-template-columns: 1.1fr 1.2fr auto auto auto auto;
-    gap: 0.65rem;
-    align-items: center;
-    background: #ffffffdd;
-    border: 1px solid #153f7033;
-    border-radius: 0.55rem;
-    padding: 0.65rem;
-  }
-
-  .logs {
-    margin-top: 1.25rem;
-    background: #ffffffdd;
-    border: 1px solid #153f7033;
-    border-radius: 0.55rem;
-    padding: 0.75rem;
-    display: grid;
-    gap: 0.75rem;
-  }
-
-  .tabs {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-  }
-
-  .tab {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    background: #eaf1f7;
-    border: 1px solid #153f7033;
-    border-radius: 0.45rem;
-    padding: 0.2rem;
-  }
-
-  .tab-button {
-    background: transparent;
-    color: #123254;
-    padding: 0.4rem 0.7rem;
-  }
-
-  .tab-button.active {
-    background: #153f70;
-    color: #fff;
-  }
-
-  .tab-close {
-    background: #c24343;
-    padding: 0.35rem 0.6rem;
-  }
-
-  .log-controls {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.65rem;
-    align-items: center;
-  }
-
-  .follow-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-  }
-
-  .follow-toggle input {
-    width: auto;
-    margin: 0;
-    padding: 0;
-  }
-
-  .status {
-    color: #1f3b4d;
-    font-size: 0.9rem;
-    font-weight: 600;
-  }
-
-  @media (max-width: 760px) {
-    form {
-      grid-template-columns: 1fr;
-    }
-
-    li {
-      grid-template-columns: 1fr 1fr;
-    }
-  }
-</style>
+<!-- Remove confirmation dialog -->
+<Dialog.Root open={confirmRemoveId !== null} onOpenChange={(open) => { if (!open) confirmRemoveId = null; }}>
+  <Dialog.Content class="border-border bg-card sm:max-w-md">
+    <Dialog.Header>
+      <Dialog.Title>Remove dev box</Dialog.Title>
+      <Dialog.Description class="text-muted-foreground">
+        This will permanently destroy the container and its network. This action cannot be undone.
+      </Dialog.Description>
+    </Dialog.Header>
+    <Dialog.Footer class="gap-2 sm:gap-0">
+      <Button variant="ghost" onclick={() => { confirmRemoveId = null; }}>Cancel</Button>
+      <Button variant="destructive" onclick={confirmRemove}>Remove</Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>

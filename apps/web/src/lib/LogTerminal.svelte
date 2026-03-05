@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Terminal } from '@xterm/xterm';
+  import type { Terminal } from '@xterm/xterm';
 
   import type { LogLine } from '$lib/devbox-store';
 
@@ -41,16 +41,19 @@
     syncTerminal();
   }
 
-  onMount(() => {
+  onMount(async () => {
+    const { Terminal } = await import('@xterm/xterm');
     terminal = new Terminal({
       convertEol: true,
       scrollback,
       cursorBlink: false,
       fontSize: 12,
-      fontFamily: '"IBM Plex Mono", "SFMono-Regular", Consolas, monospace',
+      fontFamily: '"JetBrains Mono", "IBM Plex Mono", "SFMono-Regular", Consolas, monospace',
       theme: {
-        background: '#09121f',
-        foreground: '#d4dfef'
+        background: '#0a0a10',
+        foreground: '#d4dfef',
+        cursor: '#22d3ee',
+        selectionBackground: '#22d3ee33'
       }
     });
     terminal.open(host);
@@ -64,14 +67,4 @@
   });
 </script>
 
-<div class="terminal" bind:this={host}></div>
-
-<style>
-  .terminal {
-    width: 100%;
-    min-height: 320px;
-    border-radius: 0.6rem;
-    border: 1px solid #2d4f6150;
-    overflow: hidden;
-  }
-</style>
+<div class="min-h-[320px] w-full overflow-hidden rounded-lg border border-border bg-[#0a0a10]" bind:this={host}></div>
