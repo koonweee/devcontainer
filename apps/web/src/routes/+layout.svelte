@@ -18,7 +18,7 @@
             <path d="M7 12h.01" />
           </svg>
         </div>
-        <span class="text-base font-semibold tracking-tight">Manila</span>
+        <span class="text-base font-semibold tracking-tight">devcontainer</span>
       </div>
 
       <div class="flex items-center gap-1">
