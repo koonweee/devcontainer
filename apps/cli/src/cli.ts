@@ -120,7 +120,7 @@ export function buildCliProgram(client: CliApiClient): Command {
   setup
     .command('tailnet')
     .description('Configure Tailscale credentials (required scopes: auth_keys write, devices:core write)')
-    .requiredOption('--tailnet <tailnet>', 'Tailscale tailnet name')
+    .requiredOption('--tailnet <tailnet>', 'Tailscale Tailnet ID (Admin > Settings > General)')
     .requiredOption('--client-id <id>', 'OAuth client ID')
     .requiredOption('--client-secret <secret>', 'OAuth client secret')
     .option('--tags <csv>', 'comma-separated tags (must be allowed by ACL tagOwners)', 'tag:devbox')
@@ -133,6 +133,7 @@ export function buildCliProgram(client: CliApiClient): Command {
       [
         '',
         'Requirements:',
+        '- Tailnet value: use Tailnet ID from Admin > Settings > General',
         '- OAuth scopes: auth_keys (write), devices:core (write)',
         '- ACL tagOwners must allow configured tags (default tag:devbox)',
         '- Example tagOwners: {"tagOwners":{"tag:devbox":["autogroup:admin","tag:devbox"]}}'

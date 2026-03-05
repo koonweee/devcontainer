@@ -16,6 +16,8 @@
 8. Configure Tailscale (required before creating boxes):
    - Web: complete the setup form shown on first load.
    - CLI: `npm run -w @devbox/cli start -- setup tailnet --tailnet <tailnet> --client-id <id> --client-secret <secret>`
+   - `tailnet` value: use your Tailnet ID from Tailscale Admin -> Settings -> General.
+     - Typical values: `example.com` or `user@example.com`.
    - OAuth client scopes required by this platform:
      - `auth_keys` write (mint per-box auth keys)
      - `devices:core` write (device lookup + cleanup delete)
