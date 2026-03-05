@@ -27,17 +27,17 @@ describe('API routes', () => {
       method: 'OPTIONS',
       url: '/v1/boxes',
       headers: {
-        origin: 'http://localhost:4173',
+        origin: 'http://localhost:5173',
         'access-control-request-method': 'POST'
       }
     });
 
     expect(preflight.statusCode).toBe(204);
-    expect(preflight.headers['access-control-allow-origin']).toBe('http://localhost:4173');
+    expect(preflight.headers['access-control-allow-origin']).toBe('http://localhost:5173');
     expect(preflight.headers['access-control-allow-methods']).toContain('POST');
 
     const getBoxes = await app.inject({ method: 'GET', url: '/v1/boxes' });
-    expect(getBoxes.headers['access-control-allow-origin']).toBe('http://localhost:4173');
+    expect(getBoxes.headers['access-control-allow-origin']).toBe('http://localhost:5173');
     await app.close();
   });
 
