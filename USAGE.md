@@ -5,9 +5,14 @@
 3. Review env defaults in `ENV.md`; set runtime box env values in `docker/runtime/runtime.env` as needed.
 4. Build the runtime image from `docker/runtime/Dockerfile`: `npm run build:runtime-image`.
 5. Generate contracts: `npm run gen:client`.
-6. Start stack: `docker compose up --build`.
-7. Open the web app at `http://localhost:4173`.
-8. Optional local app-only runs: `npm run -w @devbox/api dev` and `npm run -w @devbox/web dev`.
+6. Start API and web with hot reload:
+   ```sh
+   npm run dev
+   ```
+   Or run individually: `npm run dev:api`, `npm run dev:web`, `npm run dev:cli`.
+7. Open `http://localhost:5173`.
+   - API changes trigger automatic restart via `tsx watch`.
+   - Web changes apply instantly via Vite HMR.
 9. Verify changes: `npm run typecheck && npm run test`.
 10. Match CI locally before opening a PR: `npm run lint && npm run test && npm run build && npm run check:client`.
 
