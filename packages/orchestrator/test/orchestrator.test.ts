@@ -234,6 +234,42 @@ describe('DevboxOrchestrator', () => {
     expect(errored?.status).toBe('error');
   });
 
+  it('forwards follow/since/tail options when streaming managed box logs', async () => {
+    const { runtime, orchestrator } = buildHarness();
+    const created = await orchestrator.createBox({
+      name: 'box-logs-options'
+    });
+    await waitForJob(orchestrator, created.job.id);
+
+    const box = await orchestrator.getBox(created.box.id);
+    if (!box?.containerId) {
+      throw new Error('Expected container id');
+    }
+
+    runtime.pushLog(box.containerId, {
+      stream: 'stdout',
+      timestamp: new Date().toISOString(),
+      line: 'hello'
+    });
+
+    const stream = await orchestrator.streamBoxLogs(box.id, {
+      follow: true,
+      since: '2026-01-01T00:00:00.000Z',
+      tail: 200
+    });
+
+    for await (const _event of stream) {
+      break;
+    }
+
+    expect(runtime.lastStreamContainerLogsContainerId).toBe(box.containerId);
+    expect(runtime.lastStreamContainerLogsOptions).toEqual({
+      follow: true,
+      since: '2026-01-01T00:00:00.000Z',
+      tail: 200
+    });
+  });
+
   it('marks box status as error when create/stop jobs fail and hard deletes after missing-container remove failures', async () => {
     const { runtime, orchestrator } = buildHarness();
 

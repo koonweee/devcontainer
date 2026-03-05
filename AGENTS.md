@@ -86,6 +86,14 @@ This repo builds a Docker-image-based dev box platform. Keep implementations sim
 - Minimize user configuration surface; prefer zero-config defaults unless an env variable provides clear operational value.
 - Add brief JSDoc to each class describing intent; keep class JSDoc to 20 words or fewer.
 
+## State transition parity
+- When a state transition is possible via multiple inputs (UI actions, SSE/events, polling, background updates), implement one shared transition path (pure reducer/helper) and reuse it everywhere.
+- Do not maintain separate per-channel state mutation logic.
+
+## E2E verification (when applicable)
+- For user-facing behavior changes, include a Playwright scenario that confirms the behavior in the rendered UI, not only API/network responses.
+- Prefer assertions that cover both system signal correctness (event/response) and end-user-visible result.
+
 ## Plan quality requirements
 - Every plan must include a short **"Functional changes after implementation"** section that states user-visible behavior changes.
 - Every plan must include **high-ROI tests** (small number, high confidence) tied to the most critical risks and core user flows.

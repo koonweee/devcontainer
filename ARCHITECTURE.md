@@ -19,9 +19,10 @@ flowchart LR
 - Orchestrator library: [`packages/orchestrator/src`] owns box lifecycle (`create/start/stop/remove`), job orchestration, and Docker allowlisted operations.
 - API service: [`apps/api/src/app.ts`] is a thin Fastify wrapper around orchestrator calls and SSE endpoints; OpenAPI is exposed at `/openapi.json`.
 - Runtime status monitor: orchestrator subscribes to Docker container events via [`packages/orchestrator/src/dockerode-runtime.ts`] and publishes reconciled `box.updated` and `box.removed` events for live UI state (including external container deletions and managed external starts that recover errored boxes).
+- Box log streaming: API exposes box-scoped SSE logs (`/v1/boxes/:boxId/logs`) and forwards `follow/since/tail` to orchestrator runtime log streams with managed-container checks.
 - Shared API client: [`packages/api-client/src`] is generated from OpenAPI and used by both web and CLI.
-- Web app: [`apps/web/src/routes/+page.server.ts`] handles initial SSR fetch/gating, and [`apps/web/src/lib/devbox-store.ts`] applies SSE updates directly after hydration with reconnect + single resync behavior.
-- CLI app: [`apps/cli/src/index.ts`] is an API client only and does not access Docker or DB directly.
+- Web app: [`apps/web/src/routes/+page.server.ts`] handles initial SSR fetch/gating, and [`apps/web/src/lib/devbox-store.ts`] applies SSE updates directly after hydration plus tabbed per-box log viewers rendered with [`apps/web/src/lib/LogTerminal.svelte`] (`xterm`, one mounted terminal for the active tab).
+- CLI app: [`apps/cli/src/index.ts`] is an API client only and does not access Docker or DB directly; log streaming uses API endpoint options (`follow/since/tail`).
 - Runtime image: [`docker/runtime/Dockerfile`] defines the image used for created dev boxes.
 
 ## Trust boundaries

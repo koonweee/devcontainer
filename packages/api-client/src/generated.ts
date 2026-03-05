@@ -248,6 +248,7 @@ export interface paths {
                 query?: {
                     follow?: boolean;
                     since?: string;
+                    tail?: number;
                 };
                 header?: never;
                 path: {

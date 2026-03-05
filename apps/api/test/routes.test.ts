@@ -403,6 +403,53 @@ describe('API routes', () => {
     await app.close();
   });
 
+  it('streams box logs and forwards tail query options', async () => {
+    const harness = buildInMemoryHarness();
+    const app = await buildApp({ orchestrator: harness.orchestrator });
+    const address = await app.listen({ host: '127.0.0.1', port: 0 });
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/v1/boxes',
+      payload: {
+        name: 'tail-query-box'
+      }
+    });
+    const created = createRes.json() as { box: { id: string }; job: { id: string } };
+    await waitForTerminalJob(app, created.job.id);
+
+    const box = await harness.orchestrator.getBox(created.box.id);
+    if (!box?.containerId) {
+      throw new Error('Expected container id for tail query test');
+    }
+
+    harness.runtime.pushLog(box.containerId, {
+      stream: 'stdout',
+      timestamp: new Date().toISOString(),
+      line: 'tail line'
+    });
+
+    const response = await fetch(`${address}/v1/boxes/${created.box.id}/logs?tail=25`);
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain('tail line');
+    expect(harness.runtime.lastStreamContainerLogsOptions?.tail).toBe(25);
+
+    await app.close();
+  });
+
+  it('returns 400 when tail query is out of range', async () => {
+    const app = await buildApp({ orchestrator: buildInMemoryOrchestrator() });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/boxes/missing-box/logs?tail=0'
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect((response.json() as { message: string }).message).toContain('must be >= 1');
+    await app.close();
+  });
+
   it('returns 400 when requesting logs before a container exists', async () => {
     const harness = buildInMemoryHarness();
     harness.runtime.failOn.createContainer = new Error('create container failed');

@@ -87,4 +87,110 @@ describe('DockerodeRuntime', () => {
       })
     );
   });
+
+  it('passes tail and since options when requesting container logs', async () => {
+    const logs = vi
+      .fn()
+      .mockResolvedValue('2026-03-01T00:00:00.000000001Z hello from docker\n');
+    const runtime = new DockerodeRuntime({
+      getContainer: vi.fn().mockReturnValue({ logs }),
+      modem: { demuxStream: vi.fn() }
+    } as unknown as Dockerode);
+
+    const received = [];
+    for await (const event of runtime.streamContainerLogs('container-logs', {
+      follow: false,
+      since: '2026-03-01T00:00:00.000Z',
+      tail: 42
+    })) {
+      received.push(event);
+    }
+
+    expect(received).toHaveLength(1);
+    expect(logs).toHaveBeenCalledWith(
+      expect.objectContaining({
+        follow: false,
+        stdout: true,
+        stderr: true,
+        timestamps: true,
+        since: Math.floor(new Date('2026-03-01T00:00:00.000Z').getTime() / 1000),
+        tail: 42
+      })
+    );
+  });
+
+  it('filters out log lines at or before since cursor', async () => {
+    const logs = vi.fn().mockResolvedValue(
+      [
+        '2026-03-01T00:00:00.400000000Z old line',
+        '2026-03-01T00:00:00.500000000Z duplicate line',
+        '2026-03-01T00:00:00.500000001Z new line'
+      ].join('\n')
+    );
+    const runtime = new DockerodeRuntime({
+      getContainer: vi.fn().mockReturnValue({ logs }),
+      modem: { demuxStream: vi.fn() }
+    } as unknown as Dockerode);
+
+    const received = [];
+    for await (const event of runtime.streamContainerLogs('container-logs', {
+      follow: true,
+      since: '2026-03-01T00:00:00.500000000Z'
+    })) {
+      received.push(event);
+    }
+
+    expect(received).toEqual([
+      {
+        stream: 'stdout',
+        timestamp: '2026-03-01T00:00:00.500000001Z',
+        line: 'new line'
+      }
+    ]);
+    expect(logs).toHaveBeenCalledWith(
+      expect.objectContaining({
+        since: Math.floor(new Date('2026-03-01T00:00:00.500000000Z').getTime() / 1000),
+        follow: true
+      })
+    );
+  });
+
+  it('parses multiplexed non-follow buffer logs into stdout and stderr lines', async () => {
+    const stdoutPayload = '2026-03-01T00:00:00.000000000Z out line\n';
+    const stderrPayload = '2026-03-01T00:00:01.000000000Z err line\n';
+    const stdout = Buffer.from(stdoutPayload, 'utf8');
+    const stderr = Buffer.from(stderrPayload, 'utf8');
+
+    const stdoutHeader = Buffer.alloc(8);
+    stdoutHeader[0] = 1;
+    stdoutHeader.writeUInt32BE(stdout.length, 4);
+
+    const stderrHeader = Buffer.alloc(8);
+    stderrHeader[0] = 2;
+    stderrHeader.writeUInt32BE(stderr.length, 4);
+
+    const logs = vi.fn().mockResolvedValue(Buffer.concat([stdoutHeader, stdout, stderrHeader, stderr]));
+    const runtime = new DockerodeRuntime({
+      getContainer: vi.fn().mockReturnValue({ logs }),
+      modem: { demuxStream: vi.fn() }
+    } as unknown as Dockerode);
+
+    const received = [];
+    for await (const event of runtime.streamContainerLogs('container-logs', { follow: false })) {
+      received.push(event);
+    }
+
+    expect(received).toEqual([
+      {
+        stream: 'stdout',
+        timestamp: '2026-03-01T00:00:00.000000000Z',
+        line: 'out line'
+      },
+      {
+        stream: 'stderr',
+        timestamp: '2026-03-01T00:00:01.000000000Z',
+        line: 'err line'
+      }
+    ]);
+  });
 });

@@ -32,6 +32,67 @@ function parseSince(input: string | undefined): number | undefined {
   return Math.floor(asDate.getTime() / 1000);
 }
 
+function parseTail(input: number | undefined): number | undefined {
+  if (input === undefined) {
+    return undefined;
+  }
+  if (!Number.isFinite(input)) {
+    return undefined;
+  }
+  return Math.max(1, Math.floor(input));
+}
+
+const NANOSECONDS_PER_SECOND = 1_000_000_000n;
+const NANOSECONDS_PER_MILLISECOND = 1_000_000n;
+
+function parseSecondsToEpochNanos(input: string): bigint | undefined {
+  const match = input.match(/^([0-9]+)(?:\.([0-9]+))?$/);
+  if (!match) {
+    return undefined;
+  }
+
+  const seconds = BigInt(match[1]);
+  const fraction = (match[2] ?? '').slice(0, 9).padEnd(9, '0');
+
+  return seconds * NANOSECONDS_PER_SECOND + BigInt(fraction || '0');
+}
+
+function parseTimestampToEpochNanos(input: string | undefined): bigint | undefined {
+  if (!input) {
+    return undefined;
+  }
+
+  const trimmed = input.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const secondsNanos = parseSecondsToEpochNanos(trimmed);
+  if (secondsNanos !== undefined) {
+    return secondsNanos;
+  }
+
+  const zuluMatch = trimmed.match(
+    /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.([0-9]{1,9}))?Z$/
+  );
+  if (zuluMatch) {
+    const wholeSecondsMs = Date.parse(`${zuluMatch[1]}Z`);
+    if (Number.isNaN(wholeSecondsMs)) {
+      return undefined;
+    }
+
+    const fraction = (zuluMatch[2] ?? '').padEnd(9, '0');
+    return BigInt(wholeSecondsMs) * NANOSECONDS_PER_MILLISECOND + BigInt(fraction || '0');
+  }
+
+  const asDateMs = Date.parse(trimmed);
+  if (Number.isNaN(asDateMs)) {
+    return undefined;
+  }
+
+  return BigInt(asDateMs) * NANOSECONDS_PER_MILLISECOND;
+}
+
 function parseLogLine(line: string): { timestamp: string; message: string } | null {
   const trimmed = line.trim();
   if (!trimmed) {
@@ -47,6 +108,36 @@ function parseLogLine(line: string): { timestamp: string; message: string } | nu
     timestamp,
     message: parts.join(' ')
   };
+}
+
+function parseMuxedLogBuffer(
+  input: Buffer
+): Array<{ stream: 'stdout' | 'stderr'; payload: string }> | null {
+  const frames: Array<{ stream: 'stdout' | 'stderr'; payload: string }> = [];
+  let offset = 0;
+
+  while (offset < input.length) {
+    if (offset + 8 > input.length) {
+      return null;
+    }
+
+    const streamType = input[offset];
+    const size = input.readUInt32BE(offset + 4);
+    const payloadStart = offset + 8;
+    const payloadEnd = payloadStart + size;
+    if (payloadEnd > input.length) {
+      return null;
+    }
+
+    const stream: 'stdout' | 'stderr' = streamType === 2 ? 'stderr' : 'stdout';
+    frames.push({
+      stream,
+      payload: input.toString('utf8', payloadStart, payloadEnd)
+    });
+    offset = payloadEnd;
+  }
+
+  return frames;
 }
 
 interface DockerContainerEventPayload {
@@ -182,27 +273,78 @@ export class DockerodeRuntime implements DockerRuntime {
   ): AsyncIterable<RuntimeLogLine> {
     const container = this.docker.getContainer(containerId);
     const since = parseSince(options.since);
+    const sinceCursorNanos = parseTimestampToEpochNanos(options.since);
+    const tail = parseTail(options.tail);
+    const shouldIncludeTimestamp = (timestamp: string): boolean => {
+      if (sinceCursorNanos === undefined) {
+        return true;
+      }
+
+      const lineTimestampNanos = parseTimestampToEpochNanos(timestamp);
+      if (lineTimestampNanos === undefined) {
+        return true;
+      }
+
+      return lineTimestampNanos > sinceCursorNanos;
+    };
+
     const raw = options.follow
       ? await container.logs({
           follow: true,
           stdout: true,
           stderr: true,
           timestamps: true,
-          since
+          since,
+          tail
         })
       : await container.logs({
           follow: false,
           stdout: true,
           stderr: true,
           timestamps: true,
-          since
+          since,
+          tail
         });
 
-    if (Buffer.isBuffer(raw) || typeof raw === 'string') {
-      const text = Buffer.isBuffer(raw) ? raw.toString('utf8') : raw;
+    if (Buffer.isBuffer(raw)) {
+      const parsedFrames = parseMuxedLogBuffer(raw);
+      if (parsedFrames) {
+        for (const frame of parsedFrames) {
+          for (const line of frame.payload.split('\n')) {
+            const parsed = parseLogLine(line);
+            if (!parsed || !shouldIncludeTimestamp(parsed.timestamp)) {
+              continue;
+            }
+            yield {
+              stream: frame.stream,
+              timestamp: parsed.timestamp,
+              line: parsed.message
+            };
+          }
+        }
+        return;
+      }
+
+      const text = raw.toString('utf8');
       for (const line of text.split('\n')) {
         const parsed = parseLogLine(line);
-        if (!parsed) {
+        if (!parsed || !shouldIncludeTimestamp(parsed.timestamp)) {
+          continue;
+        }
+        yield {
+          stream: 'stdout',
+          timestamp: parsed.timestamp,
+          line: parsed.message
+        };
+      }
+      return;
+    }
+
+    const rawAsString = typeof (raw as unknown) === 'string' ? (raw as unknown as string) : null;
+    if (rawAsString !== null) {
+      for (const line of rawAsString.split('\n')) {
+        const parsed = parseLogLine(line);
+        if (!parsed || !shouldIncludeTimestamp(parsed.timestamp)) {
           continue;
         }
         yield {
@@ -233,7 +375,7 @@ export class DockerodeRuntime implements DockerRuntime {
 
     const onLine = (which: 'stdout' | 'stderr', line: string): void => {
       const parsed = parseLogLine(line);
-      if (!parsed) {
+      if (!parsed || !shouldIncludeTimestamp(parsed.timestamp)) {
         return;
       }
       queue.push({
