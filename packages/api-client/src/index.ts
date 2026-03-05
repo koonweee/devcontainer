@@ -13,6 +13,26 @@ export interface CreateBoxInput {
   env?: Record<string, string>;
 }
 
+export interface TailnetConfig {
+  tailnet: string;
+  oauthClientId: string;
+  oauthClientSecret: string;
+  tagsCsv: string;
+  hostnamePrefix: string;
+  authkeyExpirySeconds: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TailnetConfigInput {
+  tailnet: string;
+  oauthClientId: string;
+  oauthClientSecret: string;
+  tagsCsv?: string;
+  hostnamePrefix?: string;
+  authkeyExpirySeconds?: number;
+}
+
 export interface SseEvent<T = unknown> {
   event: string;
   data: T;
@@ -185,6 +205,42 @@ export function createApiClient(options: ApiClientOptions) {
 
     async getJob(jobId: string): Promise<Job> {
       return unwrap(await client.GET('/v1/jobs/{jobId}', { params: { path: { jobId } } }));
+    },
+
+    async getTailnetConfig(): Promise<TailnetConfig> {
+      const response = await fetchImpl(buildUrl(options.baseUrl, '/v1/tailnet/config'), {
+        headers: { accept: 'application/json' }
+      });
+      if (response.status === 404) {
+        throw new Error('Tailnet config not set');
+      }
+      if (!response.ok) {
+        throw new Error(`API error ${response.status}`);
+      }
+      return (await response.json()) as TailnetConfig;
+    },
+
+    async setTailnetConfig(input: TailnetConfigInput): Promise<TailnetConfig> {
+      const response = await fetchImpl(buildUrl(options.baseUrl, '/v1/tailnet/config'), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify(input)
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({})) as { message?: string };
+        throw new Error(`API error ${response.status}: ${body.message ?? 'unknown'}`);
+      }
+      return (await response.json()) as TailnetConfig;
+    },
+
+    async deleteTailnetConfig(): Promise<void> {
+      const response = await fetchImpl(buildUrl(options.baseUrl, '/v1/tailnet/config'), {
+        method: 'DELETE'
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({})) as { message?: string };
+        throw new Error(`API error ${response.status}: ${body.message ?? 'unknown'}`);
+      }
     },
 
     streamEvents(options?: { signal?: AbortSignal }): Promise<AsyncIterable<ApiStreamEvent>> {

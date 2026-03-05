@@ -6,5 +6,6 @@ export * from './job-runner.js';
 export * from './orchestrator.js';
 export * from './repositories.js';
 export * from './runtime.js';
+export * from './tailscale-client.js';
 export * from './types.js';
 export * from './validation.js';

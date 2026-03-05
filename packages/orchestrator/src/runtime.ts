@@ -23,6 +23,12 @@ export interface ContainerDetails {
   status: ContainerRuntimeStatus;
 }
 
+export interface ContainerDevice {
+  PathOnHost: string;
+  PathInContainer: string;
+  CgroupPermissions: string;
+}
+
 export interface CreateContainerOptions {
   name: string;
   image: string;
@@ -31,6 +37,14 @@ export interface CreateContainerOptions {
   labels: Record<string, string>;
   env?: Record<string, string>;
   command?: string[];
+  devices?: ContainerDevice[];
+  capAdd?: string[];
+}
+
+export interface ExecResult {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
 }
 
 export interface RuntimeLogLine {
@@ -66,6 +80,7 @@ export interface DockerRuntime {
   removeNetwork(name: string): Promise<void>;
   removeVolume(name: string): Promise<void>;
   inspectContainer(containerId: string): Promise<ContainerDetails | null>;
+  execContainer(containerId: string, command: string[]): Promise<ExecResult>;
   streamContainerLogs(
     containerId: string,
     options: RuntimeLogOptions

@@ -13,6 +13,10 @@
 7. Open `http://localhost:5173`.
    - API changes trigger automatic restart via `tsx watch`.
    - Web changes apply instantly via Vite HMR.
+8. Configure Tailscale (required before creating boxes):
+   - Web: complete the setup form shown on first load.
+   - CLI: `npm run -w @devbox/cli start -- setup tailnet --tailnet <tailnet> --client-id <id> --client-secret <secret>`
+   - Requires a Tailscale OAuth client with device write scope and appropriate tags.
 9. Verify changes: `npm run typecheck && npm run test`.
 10. Match CI locally before opening a PR: `npm run lint && npm run test && npm run build && npm run check:client`.
 
@@ -24,6 +28,14 @@
 5. Run post-deploy checks: API health, create/list/start/stop/remove flows, and logs/status streaming.
 
 # User flows
+
+## Tailnet setup
+- Configure once via web setup form or CLI `devbox setup tailnet`.
+- Config is locked while boxes exist (delete all boxes to reconfigure).
+- Check status: `devbox setup status` or `GET /v1/tailnet/config`.
+- Clear config: `devbox setup clear` or `DELETE /v1/tailnet/config`.
+
+## Box lifecycle
 1. Create a box:
    - API: `POST /v1/boxes`
    - Web: create form in UI

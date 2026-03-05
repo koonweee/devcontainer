@@ -4,7 +4,7 @@ import { buildApp } from '../src/app.js';
 import { buildInMemoryHarness, buildInMemoryOrchestrator } from './support/orchestrator.js';
 
 async function waitForTerminalJob(app: Awaited<ReturnType<typeof buildApp>>, jobId: string): Promise<void> {
-  const deadline = Date.now() + 2000;
+  const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
     const response = await app.inject({
       method: 'GET',

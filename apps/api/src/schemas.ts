@@ -18,6 +18,7 @@ export const BoxSchema = Type.Object(
     networkName: Type.String(),
     volumeName: Type.String(),
     tailnetUrl: Type.Union([Type.String(), Type.Null()]),
+    tailnetNodeId: Type.Union([Type.String(), Type.Null()]),
     createdAt: Type.String(),
     updatedAt: Type.String()
   },
@@ -81,7 +82,34 @@ export const CreateBoxResponseSchema = Type.Object({
   job: Type.Ref(JobSchema)
 });
 
+export const TailnetConfigSchema = Type.Object(
+  {
+    tailnet: Type.String(),
+    oauthClientId: Type.String(),
+    oauthClientSecret: Type.String(),
+    tagsCsv: Type.String(),
+    hostnamePrefix: Type.String(),
+    authkeyExpirySeconds: Type.Number(),
+    createdAt: Type.String(),
+    updatedAt: Type.String()
+  },
+  { $id: 'TailnetConfig' }
+);
+
+export const TailnetConfigBodySchema = Type.Object(
+  {
+    tailnet: Type.String(),
+    oauthClientId: Type.String(),
+    oauthClientSecret: Type.String(),
+    tagsCsv: Type.Optional(Type.String()),
+    hostnamePrefix: Type.Optional(Type.String()),
+    authkeyExpirySeconds: Type.Optional(Type.Integer({ minimum: 60 }))
+  },
+  { additionalProperties: false }
+);
+
 export type CreateBoxBody = Static<typeof CreateBoxBodySchema>;
 export type BoxIdParams = Static<typeof BoxIdParamsSchema>;
 export type JobIdParams = Static<typeof JobIdParamsSchema>;
 export type BoxLogsQuery = Static<typeof BoxLogsQuerySchema>;
+export type TailnetConfigBody = Static<typeof TailnetConfigBodySchema>;

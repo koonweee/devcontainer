@@ -4,7 +4,7 @@ import swagger from '@fastify/swagger';
 import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import { Type } from '@sinclair/typebox';
 import type { DevboxOrchestrator } from '@devbox/orchestrator/orchestrator';
-import { NotFoundError, SecurityError, ValidationError } from '@devbox/orchestrator/errors';
+import { ConfigLockedError, NotFoundError, SecurityError, SetupRequiredError, ValidationError } from '@devbox/orchestrator/errors';
 
 import {
   BoxIdParamsSchema,
@@ -13,7 +13,9 @@ import {
   CreateBoxBodySchema,
   CreateBoxResponseSchema,
   JobIdParamsSchema,
-  JobSchema
+  JobSchema,
+  TailnetConfigBodySchema,
+  TailnetConfigSchema
 } from './schemas.js';
 
 interface BuildAppOptions {
@@ -52,6 +54,16 @@ function attachErrorMapping(app: FastifyInstance): void {
       return;
     }
 
+    if (error instanceof ConfigLockedError) {
+      reply.status(409).send({ message: error.message });
+      return;
+    }
+
+    if (error instanceof SetupRequiredError) {
+      reply.status(400).send({ message: error.message });
+      return;
+    }
+
     reply.status(500).send({ message: 'Internal server error' });
   });
 }
@@ -77,7 +89,7 @@ export async function buildApp(options?: BuildAppOptions) {
   app.addHook('onRequest', async (request, reply) => {
     reply.header('Access-Control-Allow-Origin', corsOrigin);
     reply.header('Vary', 'Origin');
-    reply.header('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
+    reply.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
     reply.header('Access-Control-Allow-Headers', 'Content-Type,Accept,Authorization');
 
     if (request.method === 'OPTIONS') {
@@ -96,6 +108,7 @@ export async function buildApp(options?: BuildAppOptions) {
 
   app.addSchema(BoxSchema);
   app.addSchema(JobSchema);
+  app.addSchema(TailnetConfigSchema);
 
   attachErrorMapping(app);
 
@@ -243,6 +256,45 @@ export async function buildApp(options?: BuildAppOptions) {
         throw new NotFoundError('Job not found');
       }
       return job;
+    }
+  );
+
+  app.get(
+    '/v1/tailnet/config',
+    {
+      schema: {
+        response: {
+          200: Type.Ref(TailnetConfigSchema)
+        }
+      }
+    },
+    async () => {
+      const config = await orchestrator.getTailnetConfig();
+      if (!config) {
+        throw new NotFoundError('Tailnet config not set');
+      }
+      return config;
+    }
+  );
+
+  app.put(
+    '/v1/tailnet/config',
+    {
+      schema: {
+        body: TailnetConfigBodySchema,
+        response: {
+          200: Type.Ref(TailnetConfigSchema)
+        }
+      }
+    },
+    async (request) => orchestrator.setTailnetConfig(request.body)
+  );
+
+  app.delete(
+    '/v1/tailnet/config',
+    async () => {
+      await orchestrator.deleteTailnetConfig();
+      return { message: 'Tailnet config deleted' };
     }
   );
 

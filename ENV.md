@@ -44,7 +44,15 @@ Canonical reference for runtime environment variables and defaults.
   - CLI API base URL.
   - Recommendation: point to your deployed API endpoint when using CLI remotely.
 
+## Runtime container env (injected by orchestrator into each box)
+These are set automatically by the orchestrator when Tailscale is configured. They are not user-configurable env vars.
+
+- `DEVBOX_TAILSCALE_AUTHKEY` - Per-box Tailscale auth key (minted at create time, never persisted)
+- `DEVBOX_TAILSCALE_HOSTNAME` - Tailscale hostname for the box (e.g. `devbox-mybox-a1b2c3d4`)
+- `DEVBOX_TAILSCALE_STATE_DIR` - Tailscale state directory inside the container (default: `/var/lib/tailscale`)
+
 ## Notes
 - API bind/port are fixed by the service (`0.0.0.0:3000`) and are not configured through env vars.
 - Keep runtime container env entries in `docker/runtime/runtime.env`.
+- Tailnet credentials (OAuth client ID/secret) are stored in the SQLite database, not in env vars. Configure them via the web UI setup form or `devbox setup tailnet` CLI command.
 - For setup steps and operational flows, use `USAGE.md`.

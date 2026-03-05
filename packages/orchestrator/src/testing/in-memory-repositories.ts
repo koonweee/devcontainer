@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
-import type { Box, Job, JobFilter } from '../types.js';
-import type { BoxCreate, BoxRepository, JobCreate, JobRepository } from '../repositories.js';
+import type { Box, Job, JobFilter, TailnetConfig, TailnetConfigInput } from '../types.js';
+import type { BoxCreate, BoxRepository, JobCreate, JobRepository, TailnetConfigRepository } from '../repositories.js';
 
 function now(): string {
   return new Date().toISOString();
@@ -23,6 +23,7 @@ export class InMemoryBoxRepository implements BoxRepository {
       networkName: input.networkName,
       volumeName: input.volumeName,
       tailnetUrl: input.tailnetUrl ?? null,
+      tailnetNodeId: input.tailnetNodeId ?? null,
       createdAt: timestamp,
       updatedAt: timestamp
     };
@@ -59,6 +60,38 @@ export class InMemoryBoxRepository implements BoxRepository {
 
   delete(boxId: string): void {
     this.boxes.delete(boxId);
+  }
+
+  count(): number {
+    return this.boxes.size;
+  }
+}
+
+/** Stores tailnet config in memory for tests. */
+export class InMemoryTailnetConfigRepository implements TailnetConfigRepository {
+  private config: TailnetConfig | null = null;
+
+  get(): TailnetConfig | null {
+    return this.config;
+  }
+
+  set(input: TailnetConfigInput): TailnetConfig {
+    const timestamp = now();
+    this.config = {
+      tailnet: input.tailnet,
+      oauthClientId: input.oauthClientId,
+      oauthClientSecret: input.oauthClientSecret,
+      tagsCsv: input.tagsCsv ?? 'tag:devbox',
+      hostnamePrefix: input.hostnamePrefix ?? 'devbox',
+      authkeyExpirySeconds: input.authkeyExpirySeconds ?? 600,
+      createdAt: this.config?.createdAt ?? timestamp,
+      updatedAt: timestamp
+    };
+    return this.config;
+  }
+
+  delete(): void {
+    this.config = null;
   }
 }
 

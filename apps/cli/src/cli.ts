@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 
-import type { Box, BoxLogsEvent, Job } from '@devbox/api-client';
+import type { Box, BoxLogsEvent, Job, TailnetConfig, TailnetConfigInput } from '@devbox/api-client';
 
 export interface CliApiClient {
   createBox(input: { name: string }): Promise<{ box: Box; job: Job }>;
@@ -12,6 +12,9 @@ export interface CliApiClient {
     boxId: string,
     options?: { follow?: boolean; since?: string; tail?: number; signal?: AbortSignal }
   ): Promise<AsyncIterable<BoxLogsEvent>>;
+  getTailnetConfig(): Promise<TailnetConfig>;
+  setTailnetConfig(input: TailnetConfigInput): Promise<TailnetConfig>;
+  deleteTailnetConfig(): Promise<void>;
 }
 
 export function parsePositiveIntegerOption(name: string, value: string): number {
@@ -104,6 +107,62 @@ export function buildCliProgram(client: CliApiClient): Command {
         const payload = event.data;
         console.log(`[${payload.timestamp}] ${payload.stream}: ${payload.line}`);
       }
+    });
+
+  const setup = program.command('setup').description('Manage platform setup');
+
+  setup
+    .command('tailnet')
+    .description('Configure Tailscale credentials')
+    .requiredOption('--tailnet <tailnet>', 'Tailscale tailnet name')
+    .requiredOption('--client-id <id>', 'OAuth client ID')
+    .requiredOption('--client-secret <secret>', 'OAuth client secret')
+    .option('--tags <csv>', 'comma-separated tags', 'tag:devbox')
+    .option('--hostname-prefix <prefix>', 'hostname prefix', 'devbox')
+    .option('--authkey-expiry <seconds>', 'auth key expiry in seconds', (v) =>
+      parsePositiveIntegerOption('--authkey-expiry', v)
+    )
+    .action(async (options: {
+      tailnet: string;
+      clientId: string;
+      clientSecret: string;
+      tags: string;
+      hostnamePrefix: string;
+      authkeyExpiry?: number;
+    }) => {
+      const config = await client.setTailnetConfig({
+        tailnet: options.tailnet,
+        oauthClientId: options.clientId,
+        oauthClientSecret: options.clientSecret,
+        tagsCsv: options.tags,
+        hostnamePrefix: options.hostnamePrefix,
+        authkeyExpirySeconds: options.authkeyExpiry
+      });
+      console.log(`Tailnet configured: ${config.tailnet} (prefix: ${config.hostnamePrefix})`);
+    });
+
+  setup
+    .command('status')
+    .description('Show current setup status')
+    .action(async () => {
+      try {
+        const config = await client.getTailnetConfig();
+        console.log(`Tailnet: ${config.tailnet}`);
+        console.log(`OAuth client: ${config.oauthClientId}`);
+        console.log(`Tags: ${config.tagsCsv}`);
+        console.log(`Hostname prefix: ${config.hostnamePrefix}`);
+        console.log(`Auth key expiry: ${config.authkeyExpirySeconds}s`);
+      } catch {
+        console.log('Tailnet: not configured');
+      }
+    });
+
+  setup
+    .command('clear')
+    .description('Clear tailnet configuration')
+    .action(async () => {
+      await client.deleteTailnetConfig();
+      console.log('Tailnet configuration cleared');
     });
 
   return program;

@@ -20,8 +20,29 @@ export interface Box {
   networkName: string;
   volumeName: string;
   tailnetUrl: string | null;
+  tailnetNodeId: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface TailnetConfig {
+  tailnet: string;
+  oauthClientId: string;
+  oauthClientSecret: string;
+  tagsCsv: string;
+  hostnamePrefix: string;
+  authkeyExpirySeconds: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TailnetConfigInput {
+  tailnet: string;
+  oauthClientId: string;
+  oauthClientSecret: string;
+  tagsCsv?: string;
+  hostnamePrefix?: string;
+  authkeyExpirySeconds?: number;
 }
 
 export interface Job {

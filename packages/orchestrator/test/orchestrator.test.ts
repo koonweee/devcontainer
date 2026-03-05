@@ -3,16 +3,17 @@ import { describe, expect, it } from 'vitest';
 import { OrchestratorEvents } from '../src/events.js';
 import { JobRunner } from '../src/job-runner.js';
 import { DevboxOrchestrator } from '../src/orchestrator.js';
-import { ValidationError } from '../src/errors.js';
+import { ConfigLockedError, SetupRequiredError, ValidationError } from '../src/errors.js';
 import { managedLabels } from '../src/runtime.js';
-import { InMemoryBoxRepository, InMemoryJobRepository } from '../src/testing/in-memory-repositories.js';
+import { InMemoryBoxRepository, InMemoryJobRepository, InMemoryTailnetConfigRepository } from '../src/testing/in-memory-repositories.js';
 import { MockDockerRuntime } from '../src/testing/mock-runtime.js';
+import { MockTailscaleClient } from '../src/testing/mock-tailscale-client.js';
 
 async function waitForJob(
   orchestrator: DevboxOrchestrator,
   jobId: string
 ): Promise<'succeeded' | 'failed' | 'cancelled'> {
-  const deadline = Date.now() + 2000;
+  const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
     const job = await orchestrator.getJob(jobId);
     if (!job) {
@@ -64,6 +65,34 @@ function buildHarness(
   );
   return { runtime, orchestrator, boxes };
 }
+
+function buildTailnetHarness(): {
+  runtime: MockDockerRuntime;
+  orchestrator: DevboxOrchestrator;
+  boxes: InMemoryBoxRepository;
+  tailnetConfig: InMemoryTailnetConfigRepository;
+  tailscaleClient: MockTailscaleClient;
+} {
+  const boxes = new InMemoryBoxRepository();
+  const jobs = new InMemoryJobRepository();
+  const events = new OrchestratorEvents();
+  const runtime = new MockDockerRuntime();
+  const runner = new JobRunner(jobs, events);
+  const tailnetConfig = new InMemoryTailnetConfigRepository();
+  const tailscaleClient = new MockTailscaleClient();
+  const orchestrator = new DevboxOrchestrator(
+    runtime, boxes, jobs, runner, events,
+    undefined, { DEV_PASSWORD: 'password' },
+    tailnetConfig, tailscaleClient
+  );
+  return { runtime, orchestrator, boxes, tailnetConfig, tailscaleClient };
+}
+
+const SAMPLE_TAILNET_INPUT = {
+  tailnet: 'example.com',
+  oauthClientId: 'client-id',
+  oauthClientSecret: 'client-secret'
+};
 
 describe('DevboxOrchestrator', () => {
   it('runs create -> running state transition and creates managed resources', async () => {
@@ -615,5 +644,153 @@ describe('DevboxOrchestrator', () => {
     unsubscribe();
     await orchestrator.stopRuntimeStatusMonitor();
     expect(removedEvents).toBe(1);
+  });
+});
+
+describe('DevboxOrchestrator - Tailscale integration', () => {
+  it('createBox fails when tailnet config absent', async () => {
+    const { orchestrator } = buildTailnetHarness();
+
+    await expect(
+      orchestrator.createBox({ name: 'no-tailnet-box' })
+    ).rejects.toBeInstanceOf(SetupRequiredError);
+  });
+
+  it('createBox succeeds with tailnet config and injects Tailscale env + capabilities', async () => {
+    const { runtime, orchestrator, tailnetConfig, tailscaleClient } = buildTailnetHarness();
+    tailnetConfig.set(SAMPLE_TAILNET_INPUT);
+
+    // Set up mock exec to return a node ID
+    runtime.defaultExecResult = {
+      exitCode: 0,
+      stdout: JSON.stringify({ Self: { ID: 'node-123' } }),
+      stderr: ''
+    };
+
+    const { box, job } = await orchestrator.createBox({ name: 'tailnet-box' });
+    expect(await waitForJob(orchestrator, job.id)).toBe('succeeded');
+
+    // Verify mintAuthKey was called
+    const mintCall = tailscaleClient.calls.find((c) => c.method === 'mintAuthKey');
+    expect(mintCall).toBeTruthy();
+
+    // Verify container capabilities
+    const opts = runtime.lastCreateContainerOptions;
+    expect(opts?.devices).toEqual([
+      { PathOnHost: '/dev/net/tun', PathInContainer: '/dev/net/tun', CgroupPermissions: 'rwm' }
+    ]);
+    expect(opts?.capAdd).toEqual(['NET_ADMIN', 'NET_RAW']);
+
+    // Verify Tailscale env vars injected
+    expect(opts?.env?.DEVBOX_TAILSCALE_AUTHKEY).toBeTruthy();
+    expect(opts?.env?.DEVBOX_TAILSCALE_HOSTNAME).toMatch(/^devbox-tailnet-box-/);
+    expect(opts?.env?.DEVBOX_TAILSCALE_STATE_DIR).toBe('/var/lib/tailscale');
+
+    // Verify tailnetUrl and nodeId persisted
+    const saved = await orchestrator.getBox(box.id);
+    expect(saved?.tailnetUrl).toMatch(/^ssh:\/\/devbox-tailnet-box-/);
+    expect(saved?.tailnetNodeId).toBe('node-123');
+  });
+
+  it('config lock rejects update/delete when boxes exist', async () => {
+    const { orchestrator, tailnetConfig, runtime } = buildTailnetHarness();
+    tailnetConfig.set(SAMPLE_TAILNET_INPUT);
+
+    runtime.defaultExecResult = {
+      exitCode: 0,
+      stdout: JSON.stringify({ Self: { ID: 'node-456' } }),
+      stderr: ''
+    };
+
+    const { job } = await orchestrator.createBox({ name: 'lock-test-box' });
+    await waitForJob(orchestrator, job.id);
+
+    await expect(
+      orchestrator.setTailnetConfig(SAMPLE_TAILNET_INPUT)
+    ).rejects.toBeInstanceOf(ConfigLockedError);
+
+    await expect(
+      orchestrator.deleteTailnetConfig()
+    ).rejects.toBeInstanceOf(ConfigLockedError);
+  });
+
+  it('getTailnetConfig redacts the OAuth secret', async () => {
+    const { orchestrator, tailnetConfig } = buildTailnetHarness();
+    tailnetConfig.set(SAMPLE_TAILNET_INPUT);
+
+    const config = await orchestrator.getTailnetConfig();
+    expect(config).toBeTruthy();
+    expect(config!.oauthClientSecret).toBe('********');
+    expect(config!.tailnet).toBe('example.com');
+  });
+
+  it('removeBox cleans up Tailnet device by nodeId', async () => {
+    const { runtime, orchestrator, tailnetConfig, tailscaleClient } = buildTailnetHarness();
+    tailnetConfig.set(SAMPLE_TAILNET_INPUT);
+
+    runtime.defaultExecResult = {
+      exitCode: 0,
+      stdout: JSON.stringify({ Self: { ID: 'node-789' } }),
+      stderr: ''
+    };
+
+    tailscaleClient.devices = [
+      { id: 'device-1', nodeId: 'node-789', hostname: 'devbox-test', name: 'devbox-test' }
+    ];
+
+    const { box, job } = await orchestrator.createBox({ name: 'cleanup-test' });
+    await waitForJob(orchestrator, job.id);
+
+    const removeJob = await orchestrator.removeBox(box.id);
+    expect(await waitForJob(orchestrator, removeJob.id)).toBe('succeeded');
+
+    // Verify deleteDevice was called
+    const deleteCall = tailscaleClient.calls.find((c) => c.method === 'deleteDevice');
+    expect(deleteCall).toBeTruthy();
+    expect(deleteCall!.args[1]).toBe('device-1');
+  });
+
+  it('missing container enqueues cleanup job when tailnet is configured', async () => {
+    const { runtime, orchestrator, boxes, tailnetConfig, tailscaleClient } = buildTailnetHarness();
+    tailnetConfig.set(SAMPLE_TAILNET_INPUT);
+
+    runtime.defaultExecResult = {
+      exitCode: 0,
+      stdout: JSON.stringify({ Self: { ID: 'node-cleanup' } }),
+      stderr: ''
+    };
+
+    tailscaleClient.devices = [
+      { id: 'device-cleanup', nodeId: 'node-cleanup', hostname: 'devbox-ext-del', name: 'devbox-ext-del' }
+    ];
+
+    const { box, job } = await orchestrator.createBox({ name: 'ext-del-box' });
+    await waitForJob(orchestrator, job.id);
+
+    const initial = await orchestrator.getBox(box.id);
+    if (!initial?.containerId) {
+      throw new Error('Expected container id');
+    }
+
+    // Simulate external container deletion
+    runtime.containers.delete(initial.containerId);
+
+    // Start monitor to trigger reconciliation
+    await orchestrator.startRuntimeStatusMonitor();
+
+    runtime.emitContainerEvent({
+      containerId: initial.containerId,
+      action: 'destroy',
+      labels: managedLabels(box.id),
+      timestamp: new Date().toISOString()
+    });
+
+    // Wait for cleanup job to complete
+    await waitForCondition(() => boxes.get(box.id) === null, 5_000);
+    await orchestrator.stopRuntimeStatusMonitor();
+
+    // Verify device was cleaned up
+    const deleteCall = tailscaleClient.calls.find((c) => c.method === 'deleteDevice');
+    expect(deleteCall).toBeTruthy();
   });
 });

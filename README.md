@@ -1,6 +1,8 @@
 # Devbox Platform
 
-Monorepo for a Docker-image-based dev box platform with strict privilege boundaries.
+> **Warning**: This platform requires Tailscale integration for all dev boxes. Do not deploy to production without configuring Tailnet credentials first. See [USAGE.md](USAGE.md) for setup instructions.
+
+Monorepo for a Docker-image-based dev box platform with strict privilege boundaries. Every dev box is a persistent Tailscale node with inbound traffic restricted to Tailnet only.
 
 ## Workspace components
 

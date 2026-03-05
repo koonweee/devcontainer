@@ -15,12 +15,46 @@
   import { Input } from '$lib/components/ui/input';
   import { Separator } from '$lib/components/ui/separator';
 
-  export let data: { initialBoxes: Box[]; apiUrl: string };
+  export let data: { initialBoxes: Box[]; apiUrl: string; tailnetConfigured: boolean };
 
   const store = createDevboxStore(data.initialBoxes, data.apiUrl);
 
   let name = '';
   let confirmRemoveId: string | null = null;
+  let tailnetConfigured = data.tailnetConfigured;
+
+  // Setup form state
+  let setupTailnet = '';
+  let setupClientId = '';
+  let setupClientSecret = '';
+  let setupSaving = false;
+  let setupError = '';
+
+  async function saveTailnetConfig(event: SubmitEvent): Promise<void> {
+    event.preventDefault();
+    setupSaving = true;
+    setupError = '';
+    try {
+      const response = await fetch(`${data.apiUrl}/v1/tailnet/config`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tailnet: setupTailnet,
+          oauthClientId: setupClientId,
+          oauthClientSecret: setupClientSecret
+        })
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({})) as { message?: string };
+        throw new Error(body.message ?? `Failed (${response.status})`);
+      }
+      tailnetConfigured = true;
+    } catch (err) {
+      setupError = err instanceof Error ? err.message : 'Failed to save';
+    } finally {
+      setupSaving = false;
+    }
+  }
 
   $: activeViewer = $store.activeLogTab ? $store.logViewers[$store.activeLogTab] : null;
 
@@ -117,6 +151,36 @@
   </header>
 
   <main class="mx-auto max-w-5xl px-4 py-4">
+    <!-- Setup Gate -->
+    {#if !tailnetConfigured}
+      <Card.Root class="mb-4 border-amber-500/30 bg-amber-500/5">
+        <Card.Header>
+          <Card.Title class="text-sm font-semibold text-amber-400">Tailnet setup required</Card.Title>
+        </Card.Header>
+        <Card.Content>
+          <p class="mb-4 text-sm text-muted-foreground">Configure Tailscale credentials before creating dev boxes. All boxes will be accessible only via your Tailnet.</p>
+          <form onsubmit={saveTailnetConfig} class="space-y-3">
+            <div class="grid gap-3 sm:grid-cols-3">
+              <Input bind:value={setupTailnet} required placeholder="tailnet (e.g. example.com)" class="h-8 bg-muted/50 font-mono text-sm" />
+              <Input bind:value={setupClientId} required placeholder="OAuth client ID" class="h-8 bg-muted/50 font-mono text-sm" />
+              <Input bind:value={setupClientSecret} required placeholder="OAuth client secret" type="password" class="h-8 bg-muted/50 font-mono text-sm" />
+            </div>
+            {#if setupError}
+              <p class="text-xs text-destructive">{setupError}</p>
+            {/if}
+            <Button type="submit" variant="outline" size="sm" class="h-8 border-amber-500/40 text-amber-400 hover:bg-amber-500/10" disabled={setupSaving}>
+              {setupSaving ? 'Saving...' : 'Save configuration'}
+            </Button>
+          </form>
+        </Card.Content>
+      </Card.Root>
+    {:else if $store.boxes.length > 0}
+      <div class="mb-3 flex items-center gap-2 text-xs text-muted-foreground">
+        <div class="h-1.5 w-1.5 rounded-full bg-cyan-400"></div>
+        <span>Tailnet configured &mdash; config locked while boxes exist</span>
+      </div>
+    {/if}
+
     <!-- Error Alert -->
     {#if $store.error}
       <Alert.Root variant="destructive" class="mb-4 border-destructive/30 bg-destructive/10">
@@ -163,10 +227,17 @@
                 {box.name}
               </span>
 
-              <!-- Image -->
-              <span class="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground" title={box.image}>
-                {truncateImage(box.image)}
-              </span>
+              <!-- Tailnet URL -->
+              {#if box.tailnetUrl}
+                <span class="min-w-0 truncate font-mono text-xs text-cyan-400/80" title={box.tailnetUrl}>
+                  {box.tailnetUrl}
+                </span>
+              {:else}
+                <!-- Image -->
+                <span class="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground" title={box.image}>
+                  {truncateImage(box.image)}
+                </span>
+              {/if}
 
               <!-- Status Badge -->
               <Badge variant="outline" class={cn('shrink-0 border px-2 py-0 text-[0.65rem] font-medium uppercase tracking-wider', statusVariant(box.status))}>
