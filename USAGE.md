@@ -39,6 +39,8 @@
 - Configure once via web setup form or CLI `devbox setup tailnet`.
 - OAuth scopes required: `auth_keys` write and `devices:core` write.
 - ACL must allow configured tags in `tagOwners` (default tag: `tag:devcontainer`).
+- Tailnet SSH access is controlled by Tailscale SSH policy (`ssh` rules), not by devbox itself.
+  - Docs: https://tailscale.com/kb/1193/tailscale-ssh
 - Config is locked while boxes exist (delete all boxes to reconfigure).
 - Check status: `devbox setup status` or `GET /v1/tailnet/config`.
 - Clear config: `devbox setup clear` or `DELETE /v1/tailnet/config`.
