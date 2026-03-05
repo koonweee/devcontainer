@@ -476,7 +476,7 @@ export interface components {
             networkName: string;
             volumeName: string;
             tailnetUrl: string | null;
-            tailnetNodeId: string | null;
+            tailnetDeviceId: string | null;
             createdAt: string;
             updatedAt: string;
         };

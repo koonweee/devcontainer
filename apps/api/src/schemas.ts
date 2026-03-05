@@ -18,7 +18,7 @@ export const BoxSchema = Type.Object(
     networkName: Type.String(),
     volumeName: Type.String(),
     tailnetUrl: Type.Union([Type.String(), Type.Null()]),
-    tailnetNodeId: Type.Union([Type.String(), Type.Null()]),
+    tailnetDeviceId: Type.Union([Type.String(), Type.Null()]),
     createdAt: Type.String(),
     updatedAt: Type.String()
   },

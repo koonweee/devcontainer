@@ -12,7 +12,7 @@
     tailnetConfig: TailnetConfig | null;
     apiUrl: string;
     tailnetConfigured: boolean;
-    hasBoxes: boolean;
+    boxCount: number;
   };
 
   let editing = false;
@@ -28,7 +28,7 @@
   let formClientSecret = '';
   const client = createApiClient({ baseUrl: data.apiUrl });
 
-  $: locked = data.hasBoxes && isTailnetConfigured;
+  $: locked = data.boxCount > 0 && isTailnetConfigured;
 
   function startEdit() {
     formTailnet = currentTailnetConfig?.tailnet ?? '';
@@ -114,7 +114,8 @@
       {#if locked}
         <Alert.Root class="mb-4 border-amber-500/30 bg-amber-500/5">
           <Alert.Description class="text-sm text-amber-400">
-            Configuration is locked while dev boxes exist. Remove all boxes before editing.
+            Configuration is locked while {data.boxCount} dev box{data.boxCount === 1 ? '' : 'es'} exist.
+            Remove all boxes before editing.
           </Alert.Description>
         </Alert.Root>
       {/if}

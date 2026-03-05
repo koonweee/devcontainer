@@ -41,12 +41,6 @@ export interface CreateContainerOptions {
   capAdd?: string[];
 }
 
-export interface ExecResult {
-  exitCode: number;
-  stdout: string;
-  stderr: string;
-}
-
 export interface RuntimeLogLine {
   stream: 'stdout' | 'stderr';
   line: string;
@@ -80,7 +74,6 @@ export interface DockerRuntime {
   removeNetwork(name: string): Promise<void>;
   removeVolume(name: string): Promise<void>;
   inspectContainer(containerId: string): Promise<ContainerDetails | null>;
-  execContainer(containerId: string, command: string[]): Promise<ExecResult>;
   streamContainerLogs(
     containerId: string,
     options: RuntimeLogOptions

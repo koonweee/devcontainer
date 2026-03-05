@@ -4,7 +4,6 @@ import type {
   ContainerRuntimeStatus,
   CreateContainerOptions,
   DockerRuntime,
-  ExecResult,
   RuntimeEventOptions,
   RuntimeLogLine,
   RuntimeLogOptions
@@ -95,16 +94,6 @@ export class MockDockerRuntime implements DockerRuntime {
     this.throwIfConfigured('removeVolume');
     this.operations.push(`removeVolume:${name}`);
     this.volumes.delete(name);
-  }
-
-  execResults = new Map<string, ExecResult>();
-  defaultExecResult: ExecResult = { exitCode: 0, stdout: '{}', stderr: '' };
-
-  async execContainer(containerId: string, command: string[]): Promise<ExecResult> {
-    this.throwIfConfigured('execContainer');
-    this.operations.push(`execContainer:${containerId}:${command.join(' ')}`);
-    const key = `${containerId}:${command.join(' ')}`;
-    return this.execResults.get(key) ?? this.defaultExecResult;
   }
 
   async inspectContainer(containerId: string): Promise<ContainerDetails | null> {

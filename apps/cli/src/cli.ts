@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 
+import { getConfigLockedBoxCount } from '@devbox/api-client';
 import type { Box, BoxLogsEvent, Job, TailnetConfig, TailnetConfigInput } from '@devbox/api-client';
 
 export interface CliApiClient {
@@ -32,6 +33,11 @@ async function resolveBox(client: CliApiClient, input: string): Promise<Box> {
     throw new Error(`Box not found: ${input}`);
   }
   return match;
+}
+
+function exitWithConfigLockedError(boxCount: number): never {
+  console.error(`Error: Cannot modify tailnet config while ${boxCount} boxes exist. Remove all boxes first.`);
+  process.exit(1);
 }
 
 export function buildCliProgram(client: CliApiClient): Command {
@@ -141,9 +147,9 @@ export function buildCliProgram(client: CliApiClient): Command {
         });
         console.log(`Tailnet configured: ${config.tailnet} (prefix: ${config.hostnamePrefix})`);
       } catch (err) {
-        if (err instanceof Error && err.message.includes('Cannot modify tailnet config while boxes exist')) {
-          console.error('Error: Cannot modify tailnet config while boxes exist. Remove all boxes first.');
-          process.exit(1);
+        const boxCount = getConfigLockedBoxCount(err);
+        if (boxCount !== null) {
+          exitWithConfigLockedError(boxCount);
         }
         throw err;
       }
@@ -173,9 +179,9 @@ export function buildCliProgram(client: CliApiClient): Command {
         await client.deleteTailnetConfig();
         console.log('Tailnet configuration cleared');
       } catch (err) {
-        if (err instanceof Error && err.message.includes('Cannot modify tailnet config while boxes exist')) {
-          console.error('Error: Cannot modify tailnet config while boxes exist. Remove all boxes first.');
-          process.exit(1);
+        const boxCount = getConfigLockedBoxCount(err);
+        if (boxCount !== null) {
+          exitWithConfigLockedError(boxCount);
         }
         throw err;
       }

@@ -17,7 +17,7 @@
           "networkName",
           "volumeName",
           "tailnetUrl",
-          "tailnetNodeId",
+          "tailnetDeviceId",
           "createdAt",
           "updatedAt"
         ],
@@ -103,7 +103,7 @@
               }
             ]
           },
-          "tailnetNodeId": {
+          "tailnetDeviceId": {
             "anyOf": [
               {
                 "type": "string"

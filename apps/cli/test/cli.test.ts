@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { Box, BoxLogsEvent, Job, TailnetConfig } from '@devbox/api-client';
+import { ApiError, type Box, type BoxLogsEvent, type Job, type TailnetConfig } from '@devbox/api-client';
 
 import { buildCliProgram, parsePositiveIntegerOption, type CliApiClient } from '../src/cli.js';
 
@@ -13,9 +13,9 @@ function makeBox(overrides: Partial<Box> = {}): Box {
     networkName: 'net-1',
     volumeName: 'vol-1',
     tailnetUrl: null,
+    tailnetDeviceId: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z').toISOString(),
     updatedAt: new Date('2026-01-01T00:00:00.000Z').toISOString(),
-    deletedAt: null,
     ...overrides
   };
 }
@@ -157,7 +157,10 @@ describe('CLI setup lock messaging', () => {
 
     const client = buildClient({
       async setTailnetConfig() {
-        throw new Error('API error 409: Cannot modify tailnet config while boxes exist');
+        throw new ApiError(409, {
+          message: 'Cannot modify tailnet config while 1 boxes exist',
+          boxCount: 1
+        });
       }
     });
     const program = buildCliProgram(client);
@@ -171,7 +174,7 @@ describe('CLI setup lock messaging', () => {
     ]).catch(() => {/* expected re-throw */});
 
     expect(errorSpy).toHaveBeenCalledWith(
-      'Error: Cannot modify tailnet config while boxes exist. Remove all boxes first.'
+      'Error: Cannot modify tailnet config while 1 boxes exist. Remove all boxes first.'
     );
     expect(exitSpy).toHaveBeenCalledWith(1);
 
@@ -187,7 +190,10 @@ describe('CLI setup lock messaging', () => {
 
     const client = buildClient({
       async deleteTailnetConfig() {
-        throw new Error('API error 409: Cannot modify tailnet config while boxes exist');
+        throw new ApiError(409, {
+          message: 'Cannot delete tailnet config while 2 boxes exist',
+          boxCount: 2
+        });
       }
     });
     const program = buildCliProgram(client);
@@ -195,7 +201,7 @@ describe('CLI setup lock messaging', () => {
     await program.parseAsync(['node', 'devbox', 'setup', 'clear']).catch(() => {/* expected re-throw */});
 
     expect(errorSpy).toHaveBeenCalledWith(
-      'Error: Cannot modify tailnet config while boxes exist. Remove all boxes first.'
+      'Error: Cannot modify tailnet config while 2 boxes exist. Remove all boxes first.'
     );
     expect(exitSpy).toHaveBeenCalledWith(1);
 

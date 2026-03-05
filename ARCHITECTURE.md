@@ -36,10 +36,11 @@ flowchart LR
 - Tailnet config (OAuth credentials, tags, hostname prefix) stored in single-row `tailnet_config` SQLite table.
 - Config is locked (409) while boxes exist to prevent credential drift.
 - Box creation: orchestrator mints a per-box Tailscale auth key (ephemeral: false, reusable: false, preauthorized: true), injects it as container env, and adds `/dev/net/tun` device + `NET_ADMIN`/`NET_RAW` capabilities.
-- Node ID capture: after container start, `tailscale status --json` via exec with retry (3 attempts, 1/2/3s backoff). Persisted as `tailnetNodeId` for cleanup.
-- Box removal: Tailnet device deleted by node-id match (hostname fallback if null). Cleanup errors are warnings, not fatal.
+- Device capture: after container start, orchestrator polls Tailscale control plane by deterministic hostname with retry and persists `tailnetDeviceId`.
+- Box start: reuses persisted `tailnetDeviceId` (no in-container exec lookup).
+- Box removal: Tailnet device deleted by persisted device ID. Cleanup errors are warnings, not fatal.
 - External container deletion: reconciliation enqueues a cleanup job (Tailnet device + network + volume + DB row) instead of hard-deleting immediately.
-- Runtime entrypoint (`docker/runtime/dev-entrypoint.sh`): starts tailscaled, authenticates with authkey (first boot) or persisted state (restart), applies iptables firewall (allow lo + established + tailscale0, drop rest).
+- Runtime entrypoint (`docker/runtime/dev-entrypoint.sh`): uses fixed state dir (`/workspace/.tailscale`), authenticates with authkey on first boot, reconnects from persisted state on restart, and applies iptables firewall (allow lo + established + tailscale0, drop rest).
 
 ## Runtime network model
 - Each created box is assigned a dedicated Docker network (`devbox-net-<boxId>`) by the orchestrator and attached to that network as its container `NetworkMode`.

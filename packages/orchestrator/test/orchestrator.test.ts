@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { OrchestratorEvents } from '../src/events.js';
 import { JobRunner } from '../src/job-runner.js';
 import { DevboxOrchestrator } from '../src/orchestrator.js';
-import { ConfigLockedError, SetupRequiredError, ValidationError } from '../src/errors.js';
+import { SetupRequiredError, ValidationError } from '../src/errors.js';
 import { managedLabels } from '../src/runtime.js';
 import { InMemoryBoxRepository, InMemoryJobRepository, InMemoryTailnetConfigRepository } from '../src/testing/in-memory-repositories.js';
 import { MockDockerRuntime } from '../src/testing/mock-runtime.js';
@@ -660,13 +660,6 @@ describe('DevboxOrchestrator - Tailscale integration', () => {
     const { runtime, orchestrator, tailnetConfig, tailscaleClient } = buildTailnetHarness();
     tailnetConfig.set(SAMPLE_TAILNET_INPUT);
 
-    // Set up mock exec to return a node ID
-    runtime.defaultExecResult = {
-      exitCode: 0,
-      stdout: JSON.stringify({ Self: { ID: 'node-123' } }),
-      stderr: ''
-    };
-
     const { box, job } = await orchestrator.createBox({ name: 'tailnet-box' });
     expect(await waitForJob(orchestrator, job.id)).toBe('succeeded');
 
@@ -684,44 +677,34 @@ describe('DevboxOrchestrator - Tailscale integration', () => {
     // Verify Tailscale env vars injected
     expect(opts?.env?.DEVBOX_TAILSCALE_AUTHKEY).toBeTruthy();
     expect(opts?.env?.DEVBOX_TAILSCALE_HOSTNAME).toMatch(/^devbox-tailnet-box-/);
-    expect(opts?.env?.DEVBOX_TAILSCALE_STATE_DIR).toBe('/var/lib/tailscale');
+    expect(opts?.env?.DEVBOX_TAILSCALE_STATE_DIR).toBeUndefined();
 
-    // Verify tailnetUrl and nodeId persisted
+    // Verify tailnetUrl and deviceId persisted
     const saved = await orchestrator.getBox(box.id);
     expect(saved?.tailnetUrl).toMatch(/^ssh:\/\/devbox-tailnet-box-/);
-    expect(saved?.tailnetNodeId).toBe('node-123');
+    const hostname = saved?.tailnetUrl?.replace('ssh://', '');
+    expect(saved?.tailnetDeviceId).toBe(`device-${hostname}`);
   });
 
-  it('config lock rejects update/delete when boxes exist', async () => {
-    const { orchestrator, tailnetConfig, runtime } = buildTailnetHarness();
+  it('config lock rejects update/delete when boxes exist and reports boxCount', async () => {
+    const { orchestrator, tailnetConfig } = buildTailnetHarness();
     tailnetConfig.set(SAMPLE_TAILNET_INPUT);
-
-    runtime.defaultExecResult = {
-      exitCode: 0,
-      stdout: JSON.stringify({ Self: { ID: 'node-456' } }),
-      stderr: ''
-    };
 
     const { job } = await orchestrator.createBox({ name: 'lock-test-box' });
     await waitForJob(orchestrator, job.id);
 
     await expect(
       orchestrator.setTailnetConfig(SAMPLE_TAILNET_INPUT)
-    ).rejects.toBeInstanceOf(ConfigLockedError);
+    ).rejects.toMatchObject({ name: 'ConfigLockedError', boxCount: 1 });
 
     await expect(
       orchestrator.deleteTailnetConfig()
-    ).rejects.toBeInstanceOf(ConfigLockedError);
+    ).rejects.toMatchObject({ name: 'ConfigLockedError', boxCount: 1 });
   });
 
-  it('mints Tailscale auth key only on create, not on box restart', async () => {
-    const { runtime, orchestrator, tailnetConfig, tailscaleClient } = buildTailnetHarness();
+  it('mints Tailscale auth key only on create and skips hostname capture on restart', async () => {
+    const { orchestrator, tailnetConfig, tailscaleClient } = buildTailnetHarness();
     tailnetConfig.set(SAMPLE_TAILNET_INPUT);
-    runtime.defaultExecResult = {
-      exitCode: 0,
-      stdout: JSON.stringify({ Self: { ID: 'node-restart' } }),
-      stderr: ''
-    };
 
     const { box, job } = await orchestrator.createBox({ name: 'mint-once-box' });
     expect(await waitForJob(orchestrator, job.id)).toBe('succeeded');
@@ -733,6 +716,7 @@ describe('DevboxOrchestrator - Tailscale integration', () => {
     const startJob = await orchestrator.startBox(box.id);
     expect(await waitForJob(orchestrator, startJob.id)).toBe('succeeded');
     expect(tailscaleClient.calls.filter((c) => c.method === 'mintAuthKey')).toHaveLength(1);
+    expect(tailscaleClient.calls.filter((c) => c.method === 'findDeviceByHostname')).toHaveLength(1);
   });
 
   it('getTailnetConfig redacts the OAuth secret', async () => {
@@ -745,22 +729,16 @@ describe('DevboxOrchestrator - Tailscale integration', () => {
     expect(config!.tailnet).toBe('example.com');
   });
 
-  it('removeBox cleans up Tailnet device by nodeId', async () => {
-    const { runtime, orchestrator, tailnetConfig, tailscaleClient } = buildTailnetHarness();
+  it('removeBox cleans up Tailnet device by persisted deviceId', async () => {
+    const { orchestrator, tailnetConfig, tailscaleClient } = buildTailnetHarness();
     tailnetConfig.set(SAMPLE_TAILNET_INPUT);
-
-    runtime.defaultExecResult = {
-      exitCode: 0,
-      stdout: JSON.stringify({ Self: { ID: 'node-789' } }),
-      stderr: ''
-    };
-
-    tailscaleClient.devices = [
-      { id: 'device-1', nodeId: 'node-789', hostname: 'devbox-test', name: 'devbox-test' }
-    ];
 
     const { box, job } = await orchestrator.createBox({ name: 'cleanup-test' });
     await waitForJob(orchestrator, job.id);
+    const saved = await orchestrator.getBox(box.id);
+    if (!saved?.tailnetDeviceId) {
+      throw new Error('Expected tailnet device id');
+    }
 
     const removeJob = await orchestrator.removeBox(box.id);
     expect(await waitForJob(orchestrator, removeJob.id)).toBe('succeeded');
@@ -768,30 +746,29 @@ describe('DevboxOrchestrator - Tailscale integration', () => {
     // Verify deleteDevice was called
     const deleteCall = tailscaleClient.calls.find((c) => c.method === 'deleteDevice');
     expect(deleteCall).toBeTruthy();
-    expect(deleteCall!.args[1]).toBe('device-1');
+    expect(deleteCall!.args[1]).toBe(saved.tailnetDeviceId);
   });
 
   it('removeBox warns and still succeeds when Tailnet cleanup fails', async () => {
-    const { runtime, orchestrator, tailnetConfig, tailscaleClient } = buildTailnetHarness();
+    const { orchestrator, tailnetConfig, tailscaleClient } = buildTailnetHarness();
     tailnetConfig.set(SAMPLE_TAILNET_INPUT);
 
-    runtime.defaultExecResult = {
-      exitCode: 0,
-      stdout: JSON.stringify({ Self: { ID: 'node-warning' } }),
-      stderr: ''
-    };
-    tailscaleClient.failOn.listDevices = new Error('tailscale list failed');
+    tailscaleClient.failOn.deleteDevice = new Error('tailscale delete failed');
 
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       const { box, job } = await orchestrator.createBox({ name: 'cleanup-warning-test' });
       await waitForJob(orchestrator, job.id);
+      const saved = await orchestrator.getBox(box.id);
+      if (!saved?.tailnetDeviceId) {
+        throw new Error('Expected tailnet device id');
+      }
 
       const removeJob = await orchestrator.removeBox(box.id);
       expect(await waitForJob(orchestrator, removeJob.id)).toBe('succeeded');
       expect(await orchestrator.getBox(box.id)).toBeNull();
       expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining(`tailnet cleanup failed for box ${box.id} (nodeId:node-warning)`)
+        expect.stringContaining(`tailnet cleanup failed for box ${box.id} (deviceId:${saved.tailnetDeviceId})`)
       );
     } finally {
       warnSpy.mockRestore();
@@ -802,22 +779,12 @@ describe('DevboxOrchestrator - Tailscale integration', () => {
     const { runtime, orchestrator, boxes, tailnetConfig, tailscaleClient } = buildTailnetHarness();
     tailnetConfig.set(SAMPLE_TAILNET_INPUT);
 
-    runtime.defaultExecResult = {
-      exitCode: 0,
-      stdout: JSON.stringify({ Self: { ID: 'node-cleanup' } }),
-      stderr: ''
-    };
-
-    tailscaleClient.devices = [
-      { id: 'device-cleanup', nodeId: 'node-cleanup', hostname: 'devbox-ext-del', name: 'devbox-ext-del' }
-    ];
-
     const { box, job } = await orchestrator.createBox({ name: 'ext-del-box' });
     await waitForJob(orchestrator, job.id);
 
     const initial = await orchestrator.getBox(box.id);
-    if (!initial?.containerId) {
-      throw new Error('Expected container id');
+    if (!initial?.containerId || !initial.tailnetDeviceId) {
+      throw new Error('Expected container and tailnet device ids');
     }
 
     // Simulate external container deletion
@@ -840,5 +807,6 @@ describe('DevboxOrchestrator - Tailscale integration', () => {
     // Verify device was cleaned up
     const deleteCall = tailscaleClient.calls.find((c) => c.method === 'deleteDevice');
     expect(deleteCall).toBeTruthy();
+    expect(deleteCall?.args[1]).toBe(initial.tailnetDeviceId);
   });
 });

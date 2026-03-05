@@ -29,13 +29,6 @@ export function buildInMemoryHarness(): {
     oauthClientSecret: 'test-secret'
   });
 
-  // Return a valid node ID so captureNodeId succeeds on first retry
-  runtime.defaultExecResult = {
-    exitCode: 0,
-    stdout: JSON.stringify({ Self: { ID: 'test-node-id' } }),
-    stderr: ''
-  };
-
   const orchestrator = new DevboxOrchestrator(
     runtime, boxes, jobs, runner, events,
     undefined, undefined,

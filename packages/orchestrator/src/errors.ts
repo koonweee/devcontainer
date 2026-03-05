@@ -24,9 +24,12 @@ export class SecurityError extends Error {
 
 /** Indicates config cannot be changed while boxes exist. */
 export class ConfigLockedError extends Error {
-  constructor(message: string) {
+  readonly boxCount: number;
+
+  constructor(message: string, boxCount: number) {
     super(message);
     this.name = 'ConfigLockedError';
+    this.boxCount = boxCount;
   }
 }
 

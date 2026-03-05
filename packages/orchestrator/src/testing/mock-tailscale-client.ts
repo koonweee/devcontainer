@@ -12,6 +12,7 @@ export class MockTailscaleClient implements TailscaleClient {
   devices: TailscaleDevice[] = [];
   mintKeyResult: TailscaleAuthKey = { key: 'tskey-auth-mock', id: 'mock-key-id' };
   failOn: Partial<Record<keyof TailscaleClient, Error>> = {};
+  autoCreateDeviceOnLookup = true;
 
   private keyCounter = 0;
 
@@ -24,12 +25,23 @@ export class MockTailscaleClient implements TailscaleClient {
     return { ...this.mintKeyResult, id: `${this.mintKeyResult.id}-${this.keyCounter}` };
   }
 
-  async listDevices(config: TailnetConfig): Promise<TailscaleDevice[]> {
-    this.calls.push({ method: 'listDevices', args: [config] });
-    if (this.failOn.listDevices) {
-      throw this.failOn.listDevices;
+  async findDeviceByHostname(config: TailnetConfig, hostname: string): Promise<TailscaleDevice | null> {
+    this.calls.push({ method: 'findDeviceByHostname', args: [config, hostname] });
+    if (this.failOn.findDeviceByHostname) {
+      throw this.failOn.findDeviceByHostname;
     }
-    return [...this.devices];
+    const existing = this.devices.find((d) => d.hostname === hostname);
+    if (existing) {
+      return existing;
+    }
+    if (!this.autoCreateDeviceOnLookup) {
+      return null;
+    }
+    return {
+      id: `device-${hostname}`,
+      hostname,
+      name: hostname
+    };
   }
 
   async deleteDevice(config: TailnetConfig, deviceId: string): Promise<void> {

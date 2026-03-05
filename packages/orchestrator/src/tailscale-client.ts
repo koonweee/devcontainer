@@ -7,14 +7,13 @@ export interface TailscaleAuthKey {
 
 export interface TailscaleDevice {
   id: string;
-  nodeId: string;
   hostname: string;
   name: string;
 }
 
 export interface TailscaleClient {
   mintAuthKey(config: TailnetConfig): Promise<TailscaleAuthKey>;
-  listDevices(config: TailnetConfig): Promise<TailscaleDevice[]>;
+  findDeviceByHostname(config: TailnetConfig, hostname: string): Promise<TailscaleDevice | null>;
   deleteDevice(config: TailnetConfig, deviceId: string): Promise<void>;
 }
 
@@ -84,7 +83,7 @@ export class HttpTailscaleClient implements TailscaleClient {
     return { key: body.key, id: body.id };
   }
 
-  async listDevices(config: TailnetConfig): Promise<TailscaleDevice[]> {
+  private async listDevices(config: TailnetConfig): Promise<TailscaleDevice[]> {
     const token = await getOAuthAccessToken(config);
 
     const response = await fetch(
@@ -102,10 +101,17 @@ export class HttpTailscaleClient implements TailscaleClient {
     const body = (await response.json()) as { devices?: Array<Record<string, unknown>> };
     return (body.devices ?? []).map((d) => ({
       id: String(d.id ?? ''),
-      nodeId: String(d.nodeId ?? ''),
       hostname: String(d.hostname ?? ''),
       name: String(d.name ?? '')
     }));
+  }
+
+  async findDeviceByHostname(
+    config: TailnetConfig,
+    hostname: string
+  ): Promise<TailscaleDevice | null> {
+    const devices = await this.listDevices(config);
+    return devices.find((device) => device.hostname === hostname) ?? null;
   }
 
   async deleteDevice(config: TailnetConfig, deviceId: string): Promise<void> {

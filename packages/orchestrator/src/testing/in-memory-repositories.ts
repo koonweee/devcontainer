@@ -23,7 +23,7 @@ export class InMemoryBoxRepository implements BoxRepository {
       networkName: input.networkName,
       volumeName: input.volumeName,
       tailnetUrl: input.tailnetUrl ?? null,
-      tailnetNodeId: input.tailnetNodeId ?? null,
+      tailnetDeviceId: input.tailnetDeviceId ?? null,
       createdAt: timestamp,
       updatedAt: timestamp
     };

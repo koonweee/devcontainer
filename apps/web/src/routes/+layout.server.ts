@@ -13,13 +13,13 @@ export async function load() {
     tailnetConfigured = false;
   }
 
-  let hasBoxes = false;
+  let boxCount = 0;
   try {
     const boxes = await client.listBoxes();
-    hasBoxes = boxes.length > 0;
+    boxCount = boxes.length;
   } catch {
-    hasBoxes = false;
+    boxCount = 0;
   }
 
-  return { apiUrl: publicApiUrl, tailnetConfigured, hasBoxes };
+  return { apiUrl: publicApiUrl, tailnetConfigured, boxCount };
 }

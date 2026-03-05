@@ -8,7 +8,6 @@ import type {
   ContainerDetails,
   CreateContainerOptions,
   DockerRuntime,
-  ExecResult,
   RuntimeLogLine,
   RuntimeEventOptions,
   RuntimeLogOptions
@@ -257,37 +256,6 @@ export class DockerodeRuntime implements DockerRuntime {
 
   async removeVolume(name: string): Promise<void> {
     await this.docker.getVolume(name).remove();
-  }
-
-  async execContainer(containerId: string, command: string[]): Promise<ExecResult> {
-    const container = this.docker.getContainer(containerId);
-    const exec = await container.exec({
-      Cmd: command,
-      AttachStdout: true,
-      AttachStderr: true
-    });
-    const stream = await exec.start({ Detach: false, Tty: false });
-
-    const stdout = new PassThrough();
-    const stderr = new PassThrough();
-    this.docker.modem.demuxStream(stream, stdout, stderr);
-
-    const stdoutChunks: Buffer[] = [];
-    const stderrChunks: Buffer[] = [];
-    stdout.on('data', (chunk: Buffer) => stdoutChunks.push(chunk));
-    stderr.on('data', (chunk: Buffer) => stderrChunks.push(chunk));
-
-    await new Promise<void>((resolve, reject) => {
-      stream.on('end', resolve);
-      stream.on('error', reject);
-    });
-
-    const inspection = await exec.inspect();
-    return {
-      exitCode: (inspection as { ExitCode?: number }).ExitCode ?? -1,
-      stdout: Buffer.concat(stdoutChunks).toString('utf8'),
-      stderr: Buffer.concat(stderrChunks).toString('utf8')
-    };
   }
 
   async inspectContainer(containerId: string): Promise<ContainerDetails | null> {

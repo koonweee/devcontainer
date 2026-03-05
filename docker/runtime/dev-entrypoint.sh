@@ -18,9 +18,9 @@ echo "${DEV_USER}:${DEV_PASSWORD}" | chpasswd
 mkdir -p /var/run/sshd
 
 # --- Tailscale setup ---
-DEVBOX_TAILSCALE_STATE_DIR="${DEVBOX_TAILSCALE_STATE_DIR:-/var/lib/tailscale}"
-TAILSCALE_STATE_FILE="${DEVBOX_TAILSCALE_STATE_DIR}/tailscaled.state"
-mkdir -p "${DEVBOX_TAILSCALE_STATE_DIR}"
+TAILSCALE_STATE_DIR="/workspace/.tailscale"
+TAILSCALE_STATE_FILE="${TAILSCALE_STATE_DIR}/tailscaled.state"
+mkdir -p "${TAILSCALE_STATE_DIR}" /var/run/tailscale
 
 tailscaled --state="${TAILSCALE_STATE_FILE}" \
   --socket=/var/run/tailscale/tailscaled.sock &
@@ -34,15 +34,15 @@ done
 
 if [ -s "${TAILSCALE_STATE_FILE}" ]; then
   # Restart: reconnect using persisted state
-  tailscale up --ssh
+  tailscale up --hostname="${DEVBOX_TAILSCALE_HOSTNAME:-devbox}" --ssh
 elif [ -n "${DEVBOX_TAILSCALE_AUTHKEY:-}" ]; then
   # First boot: authenticate with authkey
   tailscale up --authkey="${DEVBOX_TAILSCALE_AUTHKEY}" \
     --hostname="${DEVBOX_TAILSCALE_HOSTNAME:-devbox}" \
     --ssh
 else
-  # Fallback path when no authkey is provided
-  tailscale up --ssh
+  echo "error: DEVBOX_TAILSCALE_AUTHKEY is required on first startup" >&2
+  exit 1
 fi
 
 # --- Firewall: restrict inbound to Tailnet only ---

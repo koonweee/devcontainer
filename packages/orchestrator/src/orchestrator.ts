@@ -11,7 +11,7 @@ import {
   type ContainerRuntimeStatus,
   type DockerRuntime
 } from './runtime.js';
-import type { TailscaleClient } from './tailscale-client.js';
+import type { TailscaleClient, TailscaleDevice } from './tailscale-client.js';
 import type {
   Box,
   CreateBoxInput,
@@ -62,7 +62,7 @@ const RUNTIME_RECONCILE_ACTIONS = new Set([
   'restart',
   'kill'
 ]);
-const NODE_ID_RETRY_DELAYS = [1_000, 2_000, 3_000] as const;
+const DEVICE_CAPTURE_RETRY_DELAYS = [1_000, 2_000, 3_000] as const;
 
 /** Coordinates box lifecycle operations, jobs, logs, and security checks. */
 export class DevboxOrchestrator {
@@ -99,8 +99,9 @@ export class DevboxOrchestrator {
     if (!this.tailnetConfigs) {
       throw new ValidationError('Tailnet configuration is not available');
     }
-    if (this.boxes.count() > 0) {
-      throw new ConfigLockedError('Cannot modify tailnet config while boxes exist');
+    const boxCount = this.boxes.count();
+    if (boxCount > 0) {
+      throw new ConfigLockedError(`Cannot modify tailnet config while ${boxCount} boxes exist`, boxCount);
     }
     const config = this.tailnetConfigs.set(input);
     return { ...config, oauthClientSecret: '********' };
@@ -110,8 +111,9 @@ export class DevboxOrchestrator {
     if (!this.tailnetConfigs) {
       throw new ValidationError('Tailnet configuration is not available');
     }
-    if (this.boxes.count() > 0) {
-      throw new ConfigLockedError('Cannot delete tailnet config while boxes exist');
+    const boxCount = this.boxes.count();
+    if (boxCount > 0) {
+      throw new ConfigLockedError(`Cannot delete tailnet config while ${boxCount} boxes exist`, boxCount);
     }
     this.tailnetConfigs.delete();
   }
@@ -143,8 +145,9 @@ export class DevboxOrchestrator {
 
     try {
       await this.runtimeMonitorTask;
-    } catch {
-      // Monitor failures are intentionally swallowed on shutdown.
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[orchestrator] runtime status monitor shutdown warning: ${message}`);
     }
   }
 
@@ -207,8 +210,7 @@ export class DevboxOrchestrator {
           tailnetHostname = `${tailnetConfig.hostnamePrefix}-${box.name}-${shortId}`;
           tailscaleEnv = {
             DEVBOX_TAILSCALE_AUTHKEY: authKey.key,
-            DEVBOX_TAILSCALE_HOSTNAME: tailnetHostname,
-            DEVBOX_TAILSCALE_STATE_DIR: '/var/lib/tailscale'
+            DEVBOX_TAILSCALE_HOSTNAME: tailnetHostname
           };
         }
 
@@ -238,13 +240,17 @@ export class DevboxOrchestrator {
         ctx.setProgress(60, 'Starting container');
         await this.runtime.startContainer(containerId);
 
-        // Capture Tailscale node ID
+        // Capture Tailscale device identity from control plane.
         if (tailnetConfig && this.tailscaleClient) {
-          ctx.setProgress(75, 'Waiting for Tailscale node');
-          const nodeId = await this.captureNodeId(containerId);
-          if (nodeId) {
-            this.boxes.update(box.id, { tailnetNodeId: nodeId });
+          if (!tailnetHostname) {
+            throw new ValidationError('Missing tailnet hostname for device capture.');
           }
+          ctx.setProgress(75, 'Waiting for Tailscale device registration');
+          const device = await this.captureDeviceByHostname(tailnetConfig, tailnetHostname);
+          if (!device) {
+            throw new ValidationError('Timed out waiting for Tailscale device registration.');
+          }
+          this.boxes.update(box.id, { tailnetDeviceId: device.id });
         }
 
         const running = this.boxes.update(box.id, {
@@ -301,12 +307,11 @@ export class DevboxOrchestrator {
         await this.assertManagedContainer(box.id, containerId);
         await this.runtime.startContainer(containerId);
 
-        // Refresh Tailscale node ID after restart
+        // Refresh Tailscale device identity after restart.
         if (this.tailnetConfigs?.get() && this.tailscaleClient) {
-          ctx.setProgress(75, 'Refreshing Tailscale node');
-          const nodeId = await this.captureNodeId(containerId);
-          if (nodeId) {
-            this.boxes.update(box.id, { tailnetNodeId: nodeId });
+          ctx.setProgress(75, 'Verifying stored Tailscale device identity');
+          if (!box.tailnetDeviceId) {
+            throw new ValidationError('Box is missing stored tailnet device ID.');
           }
         }
 
@@ -420,20 +425,24 @@ export class DevboxOrchestrator {
 
   // --- Private helpers ---
 
-  private async captureNodeId(containerId: string): Promise<string | null> {
-    for (let attempt = 0; attempt < NODE_ID_RETRY_DELAYS.length; attempt++) {
-      await new Promise((resolve) => setTimeout(resolve, NODE_ID_RETRY_DELAYS[attempt]));
+  private async captureDeviceByHostname(
+    tailnetConfig: TailnetConfig,
+    hostname: string
+  ): Promise<TailscaleDevice | null> {
+    for (let attempt = 0; attempt <= DEVICE_CAPTURE_RETRY_DELAYS.length; attempt++) {
       try {
-        const result = await this.runtime.execContainer(containerId, ['tailscale', 'status', '--json']);
-        if (result.exitCode === 0) {
-          const parsed = JSON.parse(result.stdout) as { Self?: { ID?: string } };
-          if (parsed.Self?.ID) {
-            return parsed.Self.ID;
-          }
+        const device = await this.tailscaleClient?.findDeviceByHostname(tailnetConfig, hostname);
+        if (device) {
+          return device;
         }
       } catch {
         // Retry on next iteration
       }
+
+      if (attempt === DEVICE_CAPTURE_RETRY_DELAYS.length) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, DEVICE_CAPTURE_RETRY_DELAYS[attempt]));
     }
     return null;
   }
@@ -444,25 +453,16 @@ export class DevboxOrchestrator {
       return;
     }
 
-    let cleanupPath = 'none';
+    if (!box.tailnetDeviceId) {
+      console.warn(
+        `[orchestrator] tailnet cleanup skipped for box ${box.id}: missing tailnetDeviceId`
+      );
+      return;
+    }
+
+    const cleanupPath = `deviceId:${box.tailnetDeviceId}`;
     try {
-      if (box.tailnetNodeId) {
-        cleanupPath = `nodeId:${box.tailnetNodeId}`;
-        const devices = await this.tailscaleClient.listDevices(tailnetConfig);
-        const device = devices.find((d) => d.nodeId === box.tailnetNodeId);
-        if (device) {
-          await this.tailscaleClient.deleteDevice(tailnetConfig, device.id);
-        }
-      } else if (box.tailnetUrl) {
-        // Hostname fallback: extract hostname from tailnetUrl (ssh://hostname)
-        const hostname = box.tailnetUrl.replace('ssh://', '');
-        cleanupPath = `hostname:${hostname}`;
-        const devices = await this.tailscaleClient.listDevices(tailnetConfig);
-        const device = devices.find((d) => d.hostname === hostname);
-        if (device) {
-          await this.tailscaleClient.deleteDevice(tailnetConfig, device.id);
-        }
-      }
+      await this.tailscaleClient.deleteDevice(tailnetConfig, box.tailnetDeviceId);
     } catch (error) {
       // Tailnet cleanup failure is a warning, not a fatal error.
       const message = error instanceof Error ? error.message : String(error);

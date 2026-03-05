@@ -1,6 +1,6 @@
 # Devbox Platform
 
-> **Warning**: This platform requires Tailscale integration for all dev boxes. Do not deploy to production without configuring Tailnet credentials first. See [USAGE.md](USAGE.md) for setup instructions.
+> **Warning**: Web app authentication is not implemented yet. Implement OAuth login for the full web app before production deployment.
 
 Monorepo for a Docker-image-based dev box platform with strict privilege boundaries. Every dev box is a persistent Tailscale node with inbound traffic restricted to Tailnet only.
 

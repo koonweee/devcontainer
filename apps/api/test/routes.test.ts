@@ -105,6 +105,36 @@ describe('API routes', () => {
     await app.close();
   });
 
+  it('returns config lock payload with boxCount when boxes exist', async () => {
+    const app = await buildApp({ orchestrator: buildInMemoryOrchestrator() });
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/v1/boxes',
+      payload: { name: 'lock-payload-box' }
+    });
+    expect(createRes.statusCode).toBe(200);
+    const created = createRes.json() as { job: { id: string } };
+    await waitForTerminalJob(app, created.job.id);
+
+    const putRes = await app.inject({
+      method: 'PUT',
+      url: '/v1/tailnet/config',
+      payload: {
+        tailnet: 'example.com',
+        oauthClientId: 'new-client',
+        oauthClientSecret: 'new-secret'
+      }
+    });
+    expect(putRes.statusCode).toBe(409);
+    expect(putRes.json()).toMatchObject({
+      message: expect.stringContaining('while 1 boxes exist'),
+      boxCount: 1
+    });
+
+    await app.close();
+  });
+
   it('reconciles stale runtime status on list and detail reads', async () => {
     const harness = buildInMemoryHarness();
     const app = await buildApp({ orchestrator: harness.orchestrator });

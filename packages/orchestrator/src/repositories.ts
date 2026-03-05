@@ -12,7 +12,7 @@ export interface BoxCreate {
   networkName: string;
   volumeName: string;
   tailnetUrl?: string | null;
-  tailnetNodeId?: string | null;
+  tailnetDeviceId?: string | null;
 }
 
 export interface JobCreate {
@@ -62,7 +62,7 @@ function mapBox(row: Record<string, unknown>): Box {
     networkName: String(row.network_name),
     volumeName: String(row.volume_name),
     tailnetUrl: (row.tailnet_url as string | null) ?? null,
-    tailnetNodeId: (row.tailnet_node_id as string | null) ?? null,
+    tailnetDeviceId: (row.tailnet_device_id as string | null) ?? null,
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at)
   };
@@ -105,7 +105,7 @@ const BOXES_COLUMNS_SQL = `
   network_name TEXT NOT NULL,
   volume_name TEXT NOT NULL,
   tailnet_url TEXT,
-  tailnet_node_id TEXT,
+  tailnet_device_id TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 `;
@@ -192,8 +192,8 @@ export function initializeSchema(db: DatabaseSync): void {
     db.exec(CREATE_BOXES_TABLE_SQL);
   }
 
-  if (hasBoxesTable(db) && !hasColumn(db, 'boxes', 'tailnet_node_id')) {
-    db.exec('ALTER TABLE boxes ADD COLUMN tailnet_node_id TEXT');
+  if (hasBoxesTable(db) && !hasColumn(db, 'boxes', 'tailnet_device_id')) {
+    db.exec('ALTER TABLE boxes ADD COLUMN tailnet_device_id TEXT');
   }
 
   db.exec(CREATE_NAME_UNIQUE_INDEX_SQL);
@@ -210,7 +210,7 @@ export class SqliteBoxRepository implements BoxRepository {
     this.db
       .prepare(
         `
-      INSERT INTO boxes (id, name, image, status, container_id, network_name, volume_name, tailnet_url, tailnet_node_id, created_at, updated_at)
+      INSERT INTO boxes (id, name, image, status, container_id, network_name, volume_name, tailnet_url, tailnet_device_id, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
       )
@@ -223,7 +223,7 @@ export class SqliteBoxRepository implements BoxRepository {
         input.networkName,
         input.volumeName,
         input.tailnetUrl ?? null,
-        input.tailnetNodeId ?? null,
+        input.tailnetDeviceId ?? null,
         timestamp,
         timestamp
       );
@@ -243,7 +243,7 @@ export class SqliteBoxRepository implements BoxRepository {
       .prepare(
         `
       UPDATE boxes
-      SET name = ?, image = ?, status = ?, container_id = ?, network_name = ?, volume_name = ?, tailnet_url = ?, tailnet_node_id = ?, updated_at = ?
+      SET name = ?, image = ?, status = ?, container_id = ?, network_name = ?, volume_name = ?, tailnet_url = ?, tailnet_device_id = ?, updated_at = ?
       WHERE id = ?
       `
       )
@@ -255,7 +255,7 @@ export class SqliteBoxRepository implements BoxRepository {
         updated.networkName,
         updated.volumeName,
         updated.tailnetUrl,
-        updated.tailnetNodeId,
+        updated.tailnetDeviceId,
         updated.updatedAt,
         boxId
       );

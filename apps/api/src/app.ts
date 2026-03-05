@@ -55,7 +55,7 @@ function attachErrorMapping(app: FastifyInstance): void {
     }
 
     if (error instanceof ConfigLockedError) {
-      reply.status(409).send({ message: error.message });
+      reply.status(409).send({ message: error.message, boxCount: error.boxCount });
       return;
     }
 
