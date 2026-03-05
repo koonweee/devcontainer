@@ -15,7 +15,6 @@ function makeBox(overrides: Partial<Box> = {}): Box {
     tailnetUrl: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z').toISOString(),
     updatedAt: new Date('2026-01-01T00:00:00.000Z').toISOString(),
-    deletedAt: null,
     ...overrides
   };
 }
@@ -148,6 +147,54 @@ describe('createDevboxStore', () => {
     await waitForCondition(() => latest.boxes.some((box) => box.id === initial.id && box.status === 'stopped'), 4_000);
 
     expect(listBoxesCalls).toBe(2);
+
+    disconnect();
+    unsubscribe();
+  });
+
+  it('removes boxes when box.removed events arrive', async () => {
+    const initial = makeBox();
+
+    const client = {
+      async createBox() {
+        return { box: initial };
+      },
+      async listBoxes() {
+        return [initial];
+      },
+      async stopBox() {
+        return {};
+      },
+      async removeBox() {
+        return {};
+      },
+      async streamEvents(options?: { signal?: AbortSignal }) {
+        async function* events(): AsyncIterable<ApiStreamEvent> {
+          yield {
+            event: 'box.removed',
+            data: { type: 'box.removed', boxId: initial.id }
+          };
+
+          await new Promise<void>((resolve) => {
+            if (!options?.signal || options.signal.aborted) {
+              resolve();
+              return;
+            }
+            options.signal.addEventListener('abort', () => resolve(), { once: true });
+          });
+        }
+        return events();
+      }
+    };
+
+    const store = createDevboxStore([initial], undefined, client);
+    let latest = { boxes: [initial], error: null as string | null, loading: false };
+    const unsubscribe = store.subscribe((value) => {
+      latest = value;
+    });
+
+    const disconnect = await store.connectEvents();
+    await waitForCondition(() => latest.boxes.length === 0);
 
     disconnect();
     unsubscribe();

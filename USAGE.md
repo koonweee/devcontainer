@@ -28,7 +28,7 @@
    - CLI: `npm run -w @devbox/cli start -- ls`
 3. Watch live status updates:
    - API SSE: `GET /v1/events`
-   - Web: subscribes after hydration and applies `box.updated` events directly; status changes from runtime reconciliation stream live without per-event full-list polling (external container deletion is shown as `orphaned`).
+   - Web: subscribes after hydration and applies `box.updated` and `box.removed` events directly; status and removals stream live without per-event full-list polling (external container deletion removes the box from state).
 4. Stream box logs:
    - API SSE: `GET /v1/boxes/:boxId/logs?follow=true`
    - CLI: `npm run -w @devbox/cli start -- logs -f <boxId|name>`

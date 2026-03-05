@@ -78,7 +78,7 @@ function runMigrationCheck(): void {
   const legacyRepositories = createSqliteRepositories(dbPath);
   const timestamp = new Date().toISOString();
 
-  legacyRepositories.db.exec('DROP INDEX IF EXISTS boxes_name_active_unique');
+  legacyRepositories.db.exec('DROP INDEX IF EXISTS boxes_name_unique');
   legacyRepositories.db.exec('DROP TABLE IF EXISTS boxes');
   legacyRepositories.db.exec(`
     CREATE TABLE boxes (
@@ -136,16 +136,26 @@ function runMigrationCheck(): void {
       .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'boxes'")
       .get() as { sql?: string } | undefined;
     const tableSql = tableSqlRow?.sql ?? '';
-    if (/name\s+TEXT\s+UNIQUE/i.test(tableSql)) {
-      throw new Error('legacy unique constraint still exists on boxes.name');
+    if (tableSql.includes('deleted_at')) {
+      throw new Error('legacy deleted_at column still exists after reset');
+    }
+
+    const legacyCount = repositories.db.prepare('SELECT COUNT(*) AS count FROM boxes').get() as
+      | { count?: number }
+      | undefined;
+    if ((legacyCount?.count ?? 0) !== 0) {
+      throw new Error('expected destructive reset to remove legacy box rows');
     }
 
     const indexSqlRow = repositories.db
-      .prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'boxes_name_active_unique'")
+      .prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'boxes_name_unique'")
       .get() as { sql?: string } | undefined;
     const indexSql = indexSqlRow?.sql ?? '';
-    if (!indexSql.includes('WHERE deleted_at IS NULL')) {
-      throw new Error('active-only unique index was not created');
+    if (!indexSql.includes('ON boxes(name)')) {
+      throw new Error('global name unique index was not created');
+    }
+    if (indexSql.includes('deleted_at')) {
+      throw new Error('legacy partial unique index filter should not be present');
     }
 
     repositories.boxes.create({
@@ -155,6 +165,23 @@ function runMigrationCheck(): void {
       networkName: 'legacy-net-2',
       volumeName: 'legacy-vol-2'
     });
+
+    let duplicateAllowed = false;
+    try {
+      repositories.boxes.create({
+        name: 'legacy-box',
+        image: 'debian:trixie-slim',
+        status: 'creating',
+        networkName: 'legacy-net-3',
+        volumeName: 'legacy-vol-3'
+      });
+      duplicateAllowed = true;
+    } catch {
+      // Expected.
+    }
+    if (duplicateAllowed) {
+      throw new Error('global name uniqueness did not reject duplicate name');
+    }
   } finally {
     repositories.db.close();
     rmSync(tempDir, { recursive: true, force: true });

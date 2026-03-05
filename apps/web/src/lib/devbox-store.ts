@@ -24,9 +24,6 @@ interface DevboxClient {
 
 function upsertBox(boxes: Box[], box: Box): Box[] {
   const next = boxes.filter((item) => item.id !== box.id);
-  if (box.deletedAt) {
-    return next;
-  }
   next.push(box);
   return next.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
@@ -86,15 +83,22 @@ export function createDevboxStore(initialBoxes: Box[], apiBaseUrl?: string, clie
   }
 
   function applyStreamEvent(event: ApiStreamEvent): void {
-    if (event.event !== 'box.updated') {
+    if (event.event === 'box.updated') {
+      state.update((current) => ({
+        ...current,
+        boxes: upsertBox(current.boxes, event.data.box),
+        error: null
+      }));
       return;
     }
 
-    state.update((current) => ({
-      ...current,
-      boxes: upsertBox(current.boxes, event.data.box),
-      error: null
-    }));
+    if (event.event === 'box.removed') {
+      state.update((current) => ({
+        ...current,
+        boxes: current.boxes.filter((box) => box.id !== event.data.boxId),
+        error: null
+      }));
+    }
   }
 
   async function connectEvents(): Promise<() => void> {

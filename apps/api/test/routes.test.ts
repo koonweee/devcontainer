@@ -69,6 +69,9 @@ describe('API routes', () => {
     const removeJob = removeRes.json() as { id: string };
     await waitForTerminalJob(app, removeJob.id);
 
+    const removedBox = await app.inject({ method: 'GET', url: `/v1/boxes/${created.box.id}` });
+    expect(removedBox.statusCode).toBe(404);
+
     const jobsRes = await app.inject({ method: 'GET', url: '/v1/jobs' });
     expect(jobsRes.statusCode).toBe(200);
     expect((jobsRes.json() as unknown[]).length).toBeGreaterThanOrEqual(3);
@@ -246,6 +249,57 @@ describe('API routes', () => {
 
     expect(payload).toContain('event: box.updated');
     expect(payload).toContain('"status":"stopped"');
+
+    reader.cancel().catch(() => undefined);
+    await app.close();
+  });
+
+  it('emits box.removed over SSE when boxes are removed', async () => {
+    const app = await buildApp({ orchestrator: buildInMemoryOrchestrator(), heartbeatMs: 50 });
+    const address = await app.listen({ host: '127.0.0.1', port: 0 });
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/v1/boxes',
+      payload: {
+        name: 'sse-remove-box'
+      }
+    });
+    const created = createRes.json() as { box: { id: string }; job: { id: string } };
+    await waitForTerminalJob(app, created.job.id);
+
+    const response = await fetch(`${address}/v1/events`);
+    if (!response.body) {
+      throw new Error('Expected SSE response body');
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+
+    const removeRes = await fetch(`${address}/v1/boxes/${created.box.id}`, {
+      method: 'DELETE'
+    });
+    const removeJob = (await removeRes.json()) as { id: string };
+    await waitForTerminalJob(app, removeJob.id);
+
+    let payload = '';
+    const deadline = Date.now() + 3_000;
+    while (Date.now() < deadline) {
+      const read = await Promise.race([
+        reader.read(),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timed out reading remove SSE')), 500))
+      ]);
+
+      payload += decoder.decode(read.value ?? new Uint8Array(), { stream: true });
+      if (payload.includes('event: box.removed') && payload.includes(`"boxId":"${created.box.id}"`)) {
+        break;
+      }
+      if (read.done) {
+        break;
+      }
+    }
+
+    expect(payload).toContain('event: box.removed');
+    expect(payload).toContain(`"boxId":"${created.box.id}"`);
 
     reader.cancel().catch(() => undefined);
     await app.close();

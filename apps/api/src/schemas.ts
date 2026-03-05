@@ -10,7 +10,6 @@ export const BoxSchema = Type.Object(
       Type.Literal('running'),
       Type.Literal('stopping'),
       Type.Literal('stopped'),
-      Type.Literal('orphaned'),
       Type.Literal('removing'),
       Type.Literal('error')
     ]),
@@ -19,8 +18,7 @@ export const BoxSchema = Type.Object(
     volumeName: Type.String(),
     tailnetUrl: Type.Union([Type.String(), Type.Null()]),
     createdAt: Type.String(),
-    updatedAt: Type.String(),
-    deletedAt: Type.Union([Type.String(), Type.Null()])
+    updatedAt: Type.String()
   },
   { $id: 'Box' }
 );

@@ -15,7 +15,7 @@ describe('SQLite repositories schema behavior', () => {
     expect(output).toContain('ok');
   });
 
-  it('migrates legacy global-unique name schema to active-only uniqueness', () => {
+  it('resets legacy soft-delete schema to hard-delete schema with global uniqueness', () => {
     const output = runCheck('migration');
     expect(output).toContain('ok');
   });

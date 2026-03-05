@@ -125,11 +125,20 @@ describe('DevboxOrchestrator', () => {
     const stopped = await orchestrator.getBox(created.box.id);
     expect(stopped?.status).toBe('stopped');
 
+    let removedEventBoxId: string | null = null;
+    const unsubscribe = orchestrator.events.subscribe((event) => {
+      if (event.type === 'box.removed') {
+        removedEventBoxId = event.boxId;
+      }
+    });
+
     const removeJob = await orchestrator.removeBox(created.box.id);
     expect(await waitForJob(orchestrator, removeJob.id)).toBe('succeeded');
+    unsubscribe();
 
     const removed = await orchestrator.getBox(created.box.id);
-    expect(removed?.deletedAt).toBeTruthy();
+    expect(removed).toBeNull();
+    expect(removedEventBoxId).toBe(created.box.id);
   });
 
   it('rejects invalid inputs and unmanaged resources', async () => {
@@ -163,7 +172,7 @@ describe('DevboxOrchestrator', () => {
     expect(errored?.status).toBe('error');
   });
 
-  it('marks box status as error when lifecycle jobs fail', async () => {
+  it('marks box status as error when create/stop jobs fail and hard deletes after missing-container remove failures', async () => {
     const { runtime, orchestrator } = buildHarness();
 
     runtime.failOn.createNetwork = new Error('network create failed');
@@ -188,7 +197,7 @@ describe('DevboxOrchestrator', () => {
     runtime.failOn.removeVolume = new Error('remove volume failed');
     const removeJob = await orchestrator.removeBox(created.box.id);
     expect(await waitForJob(orchestrator, removeJob.id)).toBe('failed');
-    expect((await orchestrator.getBox(created.box.id))?.status).toBe('error');
+    expect(await orchestrator.getBox(created.box.id)).toBeNull();
   });
 
   it('reconciles running boxes to stopped when runtime reports exited', async () => {
@@ -211,7 +220,7 @@ describe('DevboxOrchestrator', () => {
     expect(persisted?.status).toBe('stopped');
   });
 
-  it('marks boxes as orphaned and clears container id when inspect returns not found', async () => {
+  it('hard deletes boxes when inspect returns not found', async () => {
     const { runtime, orchestrator } = buildHarness();
     const created = await orchestrator.createBox({
       name: 'box-golf'
@@ -225,8 +234,7 @@ describe('DevboxOrchestrator', () => {
 
     runtime.containers.delete(initial.containerId);
     const reconciled = await orchestrator.getBox(created.box.id);
-    expect(reconciled?.status).toBe('orphaned');
-    expect(reconciled?.containerId).toBeNull();
+    expect(reconciled).toBeNull();
   });
 
   it('marks boxes as error and preserves container id for unmanaged containers on reads', async () => {
@@ -449,7 +457,7 @@ describe('DevboxOrchestrator', () => {
     expect((await orchestrator.getBox(created.box.id))?.status).toBe('creating');
   });
 
-  it('maps external destroy events to orphaned with cleared container id', async () => {
+  it('hard deletes boxes on external destroy events and emits box.removed', async () => {
     const { runtime, orchestrator, boxes } = buildHarness();
     const created = await orchestrator.createBox({ name: 'box-quebec' });
     await waitForJob(orchestrator, created.job.id);
@@ -460,6 +468,12 @@ describe('DevboxOrchestrator', () => {
     }
 
     await orchestrator.startRuntimeStatusMonitor();
+    let removedEvents = 0;
+    const unsubscribe = orchestrator.events.subscribe((event) => {
+      if (event.type === 'box.removed' && event.boxId === created.box.id) {
+        removedEvents += 1;
+      }
+    });
 
     runtime.containers.delete(initial.containerId);
     runtime.emitContainerEvent({
@@ -469,11 +483,10 @@ describe('DevboxOrchestrator', () => {
       timestamp: new Date().toISOString()
     });
 
-    await waitForCondition(() => {
-      const current = boxes.get(created.box.id);
-      return current?.status === 'orphaned' && current.containerId === null;
-    });
+    await waitForCondition(() => boxes.get(created.box.id) === null);
 
+    unsubscribe();
     await orchestrator.stopRuntimeStatusMonitor();
+    expect(removedEvents).toBe(1);
   });
 });

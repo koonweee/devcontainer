@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import type { Box, BoxFilter, Job, JobFilter } from '../types.js';
+import type { Box, Job, JobFilter } from '../types.js';
 import type { BoxCreate, BoxRepository, JobCreate, JobRepository } from '../repositories.js';
 
 function now(): string {
@@ -24,8 +24,7 @@ export class InMemoryBoxRepository implements BoxRepository {
       volumeName: input.volumeName,
       tailnetUrl: input.tailnetUrl ?? null,
       createdAt: timestamp,
-      updatedAt: timestamp,
-      deletedAt: null
+      updatedAt: timestamp
     };
     this.boxes.set(id, box);
     return box;
@@ -45,11 +44,8 @@ export class InMemoryBoxRepository implements BoxRepository {
     return updated;
   }
 
-  list(filter?: BoxFilter): Box[] {
-    const includeDeleted = filter?.includeDeleted ?? false;
-    return [...this.boxes.values()]
-      .filter((box) => includeDeleted || !box.deletedAt)
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  list(): Box[] {
+    return [...this.boxes.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
   get(boxId: string): Box | null {
@@ -59,6 +55,10 @@ export class InMemoryBoxRepository implements BoxRepository {
   getByName(name: string): Box | null {
     const box = [...this.boxes.values()].find((candidate) => candidate.name === name);
     return box ?? null;
+  }
+
+  delete(boxId: string): void {
+    this.boxes.delete(boxId);
   }
 }
 

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 
-import type { Box, BoxFilter, Job, JobFilter, JobStatus, JobType } from './types.js';
+import type { Box, Job, JobFilter, JobStatus, JobType } from './types.js';
 
 export interface BoxCreate {
   id?: string;
@@ -27,9 +27,10 @@ export interface JobCreate {
 export interface BoxRepository {
   create(input: BoxCreate): Box;
   update(boxId: string, patch: Partial<Omit<Box, 'id' | 'createdAt'>>): Box;
-  list(filter?: BoxFilter): Box[];
+  list(): Box[];
   get(boxId: string): Box | null;
   getByName(name: string): Box | null;
+  delete(boxId: string): void;
 }
 
 export interface JobRepository {
@@ -54,8 +55,7 @@ function mapBox(row: Record<string, unknown>): Box {
     volumeName: String(row.volume_name),
     tailnetUrl: (row.tailnet_url as string | null) ?? null,
     createdAt: String(row.created_at),
-    updatedAt: String(row.updated_at),
-    deletedAt: (row.deleted_at as string | null) ?? null
+    updatedAt: String(row.updated_at)
   };
 }
 
@@ -84,18 +84,11 @@ const BOXES_COLUMNS_SQL = `
   volume_name TEXT NOT NULL,
   tailnet_url TEXT,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  deleted_at TEXT
+  updated_at TEXT NOT NULL
 `;
 
 const CREATE_BOXES_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS boxes (
-    ${BOXES_COLUMNS_SQL}
-  );
-`;
-
-const CREATE_BOXES_TABLE_MIGRATION_SQL = `
-  CREATE TABLE boxes (
     ${BOXES_COLUMNS_SQL}
   );
 `;
@@ -115,57 +108,32 @@ const CREATE_JOBS_TABLE_SQL = `
   );
 `;
 
-const CREATE_ACTIVE_NAME_UNIQUE_INDEX_SQL = `
-  CREATE UNIQUE INDEX IF NOT EXISTS boxes_name_active_unique
-  ON boxes(name)
-  WHERE deleted_at IS NULL;
+const CREATE_NAME_UNIQUE_INDEX_SQL = `
+  CREATE UNIQUE INDEX IF NOT EXISTS boxes_name_unique
+  ON boxes(name);
 `;
 
-function hasLegacyBoxNameUniqueConstraint(db: DatabaseSync): boolean {
-  const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'boxes'").get() as
-    | { sql?: unknown }
-    | undefined;
-  if (!row || typeof row.sql !== 'string') {
+function hasBoxesTable(db: DatabaseSync): boolean {
+  const row = db
+    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'boxes'")
+    .get() as { 1?: number } | undefined;
+  return row !== undefined;
+}
+
+function hasDeletedAtColumn(db: DatabaseSync): boolean {
+  if (!hasBoxesTable(db)) {
     return false;
   }
 
-  return /name\s+TEXT\s+UNIQUE/i.test(row.sql);
+  const columns = db.prepare("PRAGMA table_info('boxes')").all() as Array<{ name?: unknown }>;
+  return columns.some((column) => column.name === 'deleted_at');
 }
 
-function migrateLegacyBoxesTable(db: DatabaseSync): void {
+function resetBoxesTableForHardDeletes(db: DatabaseSync): void {
   db.exec('BEGIN');
   try {
-    db.exec('ALTER TABLE boxes RENAME TO boxes_legacy');
-    db.exec(CREATE_BOXES_TABLE_MIGRATION_SQL);
-    db.exec(`
-      INSERT INTO boxes (
-        id,
-        name,
-        image,
-        status,
-        container_id,
-        network_name,
-        volume_name,
-        tailnet_url,
-        created_at,
-        updated_at,
-        deleted_at
-      )
-      SELECT
-        id,
-        name,
-        image,
-        status,
-        container_id,
-        network_name,
-        volume_name,
-        tailnet_url,
-        created_at,
-        updated_at,
-        deleted_at
-      FROM boxes_legacy
-    `);
-    db.exec('DROP TABLE boxes_legacy');
+    db.exec('DROP TABLE IF EXISTS boxes');
+    db.exec(CREATE_BOXES_TABLE_SQL);
     db.exec('COMMIT');
   } catch (error) {
     db.exec('ROLLBACK');
@@ -176,12 +144,13 @@ function migrateLegacyBoxesTable(db: DatabaseSync): void {
 export function initializeSchema(db: DatabaseSync): void {
   db.exec(CREATE_JOBS_TABLE_SQL);
 
-  if (hasLegacyBoxNameUniqueConstraint(db)) {
-    migrateLegacyBoxesTable(db);
+  if (hasDeletedAtColumn(db)) {
+    resetBoxesTableForHardDeletes(db);
+  } else {
+    db.exec(CREATE_BOXES_TABLE_SQL);
   }
 
-  db.exec(CREATE_BOXES_TABLE_SQL);
-  db.exec(CREATE_ACTIVE_NAME_UNIQUE_INDEX_SQL);
+  db.exec(CREATE_NAME_UNIQUE_INDEX_SQL);
 }
 
 /** Persists box records in SQLite with minimal query logic. */
@@ -194,8 +163,8 @@ export class SqliteBoxRepository implements BoxRepository {
     this.db
       .prepare(
         `
-      INSERT INTO boxes (id, name, image, status, container_id, network_name, volume_name, tailnet_url, created_at, updated_at, deleted_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+      INSERT INTO boxes (id, name, image, status, container_id, network_name, volume_name, tailnet_url, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
       )
       .run(
@@ -226,7 +195,7 @@ export class SqliteBoxRepository implements BoxRepository {
       .prepare(
         `
       UPDATE boxes
-      SET name = ?, image = ?, status = ?, container_id = ?, network_name = ?, volume_name = ?, tailnet_url = ?, updated_at = ?, deleted_at = ?
+      SET name = ?, image = ?, status = ?, container_id = ?, network_name = ?, volume_name = ?, tailnet_url = ?, updated_at = ?
       WHERE id = ?
       `
       )
@@ -239,19 +208,17 @@ export class SqliteBoxRepository implements BoxRepository {
         updated.volumeName,
         updated.tailnetUrl,
         updated.updatedAt,
-        updated.deletedAt,
         boxId
       );
 
     return this.getRequired(boxId);
   }
 
-  list(filter?: BoxFilter): Box[] {
-    const includeDeleted = filter?.includeDeleted ?? false;
-    const query = includeDeleted
-      ? 'SELECT * FROM boxes ORDER BY created_at DESC'
-      : 'SELECT * FROM boxes WHERE deleted_at IS NULL ORDER BY created_at DESC';
-    const rows = this.db.prepare(query).all() as Record<string, unknown>[];
+  list(): Box[] {
+    const rows = this.db.prepare('SELECT * FROM boxes ORDER BY created_at DESC').all() as Record<
+      string,
+      unknown
+    >[];
     return rows.map(mapBox);
   }
 
@@ -267,6 +234,10 @@ export class SqliteBoxRepository implements BoxRepository {
       | Record<string, unknown>
       | undefined;
     return row ? mapBox(row) : null;
+  }
+
+  delete(boxId: string): void {
+    this.db.prepare('DELETE FROM boxes WHERE id = ?').run(boxId);
   }
 
   private getRequired(boxId: string): Box {

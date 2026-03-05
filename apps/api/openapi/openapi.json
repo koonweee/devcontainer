@@ -18,8 +18,7 @@
           "volumeName",
           "tailnetUrl",
           "createdAt",
-          "updatedAt",
-          "deletedAt"
+          "updatedAt"
         ],
         "properties": {
           "id": {
@@ -55,12 +54,6 @@
                 "type": "string",
                 "enum": [
                   "stopped"
-                ]
-              },
-              {
-                "type": "string",
-                "enum": [
-                  "orphaned"
                 ]
               },
               {
@@ -108,16 +101,6 @@
           },
           "updatedAt": {
             "type": "string"
-          },
-          "deletedAt": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
           }
         },
         "title": "Box"

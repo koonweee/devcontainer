@@ -351,14 +351,13 @@ export interface components {
             id: string;
             name: string;
             image: string;
-            status: "creating" | "running" | "stopping" | "stopped" | "orphaned" | "removing" | "error";
+            status: "creating" | "running" | "stopping" | "stopped" | "removing" | "error";
             containerId: string | null;
             networkName: string;
             volumeName: string;
             tailnetUrl: string | null;
             createdAt: string;
             updatedAt: string;
-            deletedAt: string | null;
         };
         /** Job */
         "def-1": {

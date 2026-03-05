@@ -13,7 +13,6 @@ import {
 } from './runtime.js';
 import type {
   Box,
-  BoxFilter,
   CreateBoxInput,
   CreateBoxResult,
   Job,
@@ -48,7 +47,7 @@ function isBoxNameConstraintError(error: unknown): boolean {
   return error.message.includes('UNIQUE constraint failed: boxes.name');
 }
 
-const STABLE_RECONCILE_STATUSES = new Set<Box['status']>(['running', 'stopped', 'orphaned', 'error']);
+const STABLE_RECONCILE_STATUSES = new Set<Box['status']>(['running', 'stopped', 'error']);
 const RUNTIME_MONITOR_BACKOFF_MS = [250, 500, 1_000, 2_000, 5_000] as const;
 const RUNTIME_RECONCILE_ACTIONS = new Set([
   'start',
@@ -110,7 +109,7 @@ export class DevboxOrchestrator {
     validateCreateBoxInput(input);
 
     const existing = this.boxes.getByName(input.name);
-    if (existing && !existing.deletedAt) {
+    if (existing) {
       throw new ValidationError(`Box name already exists: ${input.name}`);
     }
 
@@ -184,9 +183,9 @@ export class DevboxOrchestrator {
     return { box, job };
   }
 
-  async listBoxes(filter?: BoxFilter): Promise<Box[]> {
-    const boxes = this.boxes.list(filter);
-    return Promise.all(boxes.map((box) => this.reconcileBoxForRead(box)));
+  async listBoxes(): Promise<Box[]> {
+    const boxes = await Promise.all(this.boxes.list().map((box) => this.reconcileBoxForRead(box)));
+    return boxes.filter((box): box is Box => box !== null);
   }
 
   async getBox(boxId: string): Promise<Box | null> {
@@ -259,12 +258,8 @@ export class DevboxOrchestrator {
         ctx.setProgress(85, 'Removing volume');
         await this.runtime.removeVolume(box.volumeName);
 
-        const deleted = this.boxes.update(box.id, {
-          status: 'stopped',
-          containerId: null,
-          deletedAt: new Date().toISOString()
-        });
-        this.publishBox(deleted);
+        this.boxes.delete(box.id);
+        this.publishBoxRemoved(box.id);
       } catch (error) {
         this.markBoxError(box.id);
         throw error;
@@ -369,7 +364,7 @@ export class DevboxOrchestrator {
   private async reconcileStableBoxesForMonitor(): Promise<void> {
     const allBoxes = this.boxes.list();
     for (const box of allBoxes) {
-      if (box.deletedAt || !STABLE_RECONCILE_STATUSES.has(box.status)) {
+      if (!STABLE_RECONCILE_STATUSES.has(box.status)) {
         continue;
       }
       await this.reconcileBox(box, true);
@@ -378,7 +373,7 @@ export class DevboxOrchestrator {
 
   private async reconcileBoxByIdForMonitor(boxId: string, containerId: string): Promise<void> {
     const box = this.boxes.get(boxId);
-    if (!box || box.deletedAt) {
+    if (!box) {
       return;
     }
 
@@ -410,27 +405,27 @@ export class DevboxOrchestrator {
     });
   }
 
-  private async reconcileBoxForRead(box: Box): Promise<Box> {
+  private async reconcileBoxForRead(box: Box): Promise<Box | null> {
     return this.reconcileBox(box, false);
   }
 
-  private async reconcileBox(box: Box, emitUpdate: boolean): Promise<Box> {
-    if (box.deletedAt || !STABLE_RECONCILE_STATUSES.has(box.status)) {
+  private async reconcileBox(box: Box, emitUpdate: boolean): Promise<Box | null> {
+    if (!STABLE_RECONCILE_STATUSES.has(box.status)) {
       return box;
     }
 
     if (!box.containerId) {
-      if (box.status === 'stopped' || box.status === 'orphaned' || box.status === 'error') {
+      if (box.status === 'stopped' || box.status === 'error') {
         return box;
       }
-      return this.resolveReconcileResult(
-        box,
-        this.updateBoxIfChanged(box.id, {
-          status: 'error',
-          containerId: null
-        }),
-        emitUpdate
-      );
+      const result = this.updateBoxIfChanged(box.id, {
+        status: 'error',
+        containerId: null
+      });
+      if (emitUpdate && result.changed && result.box) {
+        this.publishBox(result.box);
+      }
+      return result.box ?? box;
     }
 
     let details: Awaited<ReturnType<DockerRuntime['inspectContainer']>>;
@@ -442,54 +437,38 @@ export class DevboxOrchestrator {
     }
 
     if (!details) {
-      const nextStatus: Box['status'] = box.status === 'error' ? 'error' : 'orphaned';
-      return this.resolveReconcileResult(
-        box,
-        this.updateBoxIfChanged(box.id, {
-          status: nextStatus,
-          containerId: null
-        }),
-        emitUpdate
-      );
+      this.boxes.delete(box.id);
+      if (emitUpdate) {
+        this.publishBoxRemoved(box.id);
+      }
+      return null;
     }
 
     try {
       assertManaged(details.labels, box.id);
     } catch {
-      return this.resolveReconcileResult(
-        box,
-        this.updateBoxIfChanged(box.id, {
-          status: 'error',
-          containerId: box.containerId
-        }),
-        emitUpdate
-      );
+      const result = this.updateBoxIfChanged(box.id, {
+        status: 'error',
+        containerId: box.containerId
+      });
+      if (emitUpdate && result.changed && result.box) {
+        this.publishBox(result.box);
+      }
+      return result.box ?? box;
     }
 
     if (box.status === 'error') {
       return box;
     }
 
-    return this.resolveReconcileResult(
-      box,
-      this.updateBoxIfChanged(box.id, {
-        status: this.mapContainerStateToBoxStatus(details.status),
-        containerId: box.containerId
-      }),
-      emitUpdate
-    );
-  }
-
-  private resolveReconcileResult(
-    original: Box,
-    result: { box: Box | null; changed: boolean },
-    emitUpdate: boolean
-  ): Box {
-    const next = result.box ?? original;
-    if (emitUpdate && result.changed) {
-      this.publishBox(next);
+    const result = this.updateBoxIfChanged(box.id, {
+      status: this.mapContainerStateToBoxStatus(details.status),
+      containerId: box.containerId
+    });
+    if (emitUpdate && result.changed && result.box) {
+      this.publishBox(result.box);
     }
-    return next;
+    return result.box ?? box;
   }
 
   private updateBoxIfChanged(
@@ -504,7 +483,7 @@ export class DevboxOrchestrator {
       return { box: null, changed: false };
     }
 
-    if (current.deletedAt || !STABLE_RECONCILE_STATUSES.has(current.status)) {
+    if (!STABLE_RECONCILE_STATUSES.has(current.status)) {
       return { box: current, changed: false };
     }
 
@@ -531,7 +510,7 @@ export class DevboxOrchestrator {
 
   private requireBox(boxId: string): Box {
     const box = this.boxes.get(boxId);
-    if (!box || box.deletedAt) {
+    if (!box) {
       throw new NotFoundError(`Box not found: ${boxId}`);
     }
     return box;
@@ -554,6 +533,13 @@ export class DevboxOrchestrator {
     this.events.emit('box.updated', {
       type: 'box.updated',
       box
+    });
+  }
+
+  private publishBoxRemoved(boxId: string): void {
+    this.events.emit('box.removed', {
+      type: 'box.removed',
+      boxId
     });
   }
 }

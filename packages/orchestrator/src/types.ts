@@ -3,7 +3,6 @@ export type BoxStatus =
   | 'running'
   | 'stopping'
   | 'stopped'
-  | 'orphaned'
   | 'removing'
   | 'error';
 
@@ -22,7 +21,6 @@ export interface Box {
   tailnetUrl: string | null;
   createdAt: string;
   updatedAt: string;
-  deletedAt: string | null;
 }
 
 export interface Job {
@@ -44,10 +42,6 @@ export interface CreateBoxInput {
   env?: Record<string, string>;
 }
 
-export interface BoxFilter {
-  includeDeleted?: boolean;
-}
-
 export interface JobFilter {
   boxId?: string;
 }
@@ -67,6 +61,7 @@ export interface LogOptions {
 export interface OrchestratorEventMap {
   'job.updated': { type: 'job.updated'; job: Job };
   'box.updated': { type: 'box.updated'; box: Box };
+  'box.removed': { type: 'box.removed'; boxId: string };
   'box.logs': { type: 'box.logs'; boxId: string; log: LogEvent };
 }
 

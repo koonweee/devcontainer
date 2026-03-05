@@ -34,6 +34,10 @@ export interface BoxUpdatedEvent extends SseEvent<{ type: 'box.updated'; box: Bo
   event: 'box.updated';
 }
 
+export interface BoxRemovedEvent extends SseEvent<{ type: 'box.removed'; boxId: string }> {
+  event: 'box.removed';
+}
+
 export interface BoxLogEvent {
   boxId: string;
   stream: 'stdout' | 'stderr';
@@ -49,7 +53,8 @@ export type ApiStreamEvent =
   | ReadyEvent
   | HeartbeatEvent
   | JobUpdatedEvent
-  | BoxUpdatedEvent;
+  | BoxUpdatedEvent
+  | BoxRemovedEvent;
 
 export interface ApiClientOptions {
   baseUrl: string;
