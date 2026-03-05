@@ -14,5 +14,8 @@
   },
   "devDependencies": {
     "openapi-typescript": "^7.6.1"
+  },
+  "dependencies": {
+    "parse-sse": "^0.1.0"
   }
 }

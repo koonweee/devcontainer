@@ -1,3 +1,4 @@
+import { parseServerSentEvents } from 'parse-sse';
 import type { paths } from './generated.js';
 
 export type Box =
@@ -59,45 +60,23 @@ async function* parseSse<T>(response: Response): AsyncIterable<SseEvent<T>> {
   if (!response.ok) {
     throw new Error(`Failed SSE request: ${response.status}`);
   }
-  if (!response.body) {
-    throw new Error('SSE response body is missing');
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
+  const stream = parseServerSentEvents(response);
+  const reader = stream.getReader();
 
   while (true) {
-    const { done, value } = await reader.read();
+    const { value, done } = await reader.read();
     if (done) {
       break;
     }
 
-    buffer += decoder.decode(value, { stream: true });
-    const messages = buffer.split('\n\n');
-    buffer = messages.pop() ?? '';
-
-    for (const msg of messages) {
-      const eventLine = msg
-        .split('\n')
-        .find((line) => line.startsWith('event:'))
-        ?.slice('event:'.length)
-        .trim();
-      const dataLine = msg
-        .split('\n')
-        .find((line) => line.startsWith('data:'))
-        ?.slice('data:'.length)
-        .trim();
-
-      if (!eventLine || !dataLine) {
-        continue;
-      }
-
-      yield {
-        event: eventLine,
-        data: JSON.parse(dataLine) as T
-      };
+    if (!value) {
+      continue;
     }
+
+    yield {
+      event: value.type,
+      data: JSON.parse(value.data) as T
+    };
   }
 }
 
