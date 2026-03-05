@@ -143,7 +143,7 @@
         <!-- No config: show form directly -->
         <form onsubmit={saveConfig} class="space-y-3">
           <div class="grid gap-3 sm:grid-cols-3">
-            <Input bind:value={formTailnet} required placeholder="tailnet (e.g. example.com)" class="h-8 bg-muted/50 font-mono text-sm" />
+            <Input bind:value={formTailnet} required placeholder="Tailnet ID (e.g. example.com)" class="h-8 bg-muted/50 font-mono text-sm" />
             <Input bind:value={formClientId} required placeholder="OAuth client ID" class="h-8 bg-muted/50 font-mono text-sm" />
             <Input bind:value={formClientSecret} required placeholder="OAuth client secret" type="password" class="h-8 bg-muted/50 font-mono text-sm" />
           </div>
@@ -157,7 +157,7 @@
         <!-- Edit form -->
         <form onsubmit={saveConfig} class="space-y-3">
           <div class="grid gap-3 sm:grid-cols-3">
-            <Input bind:value={formTailnet} required placeholder="tailnet (e.g. example.com)" class="h-8 bg-muted/50 font-mono text-sm" />
+            <Input bind:value={formTailnet} required placeholder="Tailnet ID (e.g. example.com)" class="h-8 bg-muted/50 font-mono text-sm" />
             <Input bind:value={formClientId} required placeholder="OAuth client ID" class="h-8 bg-muted/50 font-mono text-sm" />
             <Input bind:value={formClientSecret} required placeholder="OAuth client secret" type="password" class="h-8 bg-muted/50 font-mono text-sm" />
           </div>
