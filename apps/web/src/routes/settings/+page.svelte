@@ -26,6 +26,7 @@
   let formTailnet = '';
   let formClientId = '';
   let formClientSecret = '';
+  let formTags = 'tag:devcontainer';
   const client = createApiClient({ baseUrl: data.apiUrl });
 
   $: locked = data.boxCount > 0 && isTailnetConfigured;
@@ -34,6 +35,7 @@
     formTailnet = currentTailnetConfig?.tailnet ?? '';
     formClientId = currentTailnetConfig?.oauthClientId ?? '';
     formClientSecret = '';
+    formTags = currentTailnetConfig?.tagsCsv ?? 'tag:devcontainer';
     editing = true;
     error = '';
     success = '';
@@ -53,7 +55,8 @@
       const config = await client.setTailnetConfig({
         tailnet: formTailnet,
         oauthClientId: formClientId,
-        oauthClientSecret: formClientSecret
+        oauthClientSecret: formClientSecret,
+        tagsCsv: formTags
       });
       currentTailnetConfig = config;
       isTailnetConfigured = true;
@@ -110,7 +113,7 @@
         <div class="mt-2 space-y-1">
           <p>Tailnet value: use your Tailnet ID from Admin &rarr; Settings &rarr; General.</p>
           <p>Required scopes: <code>auth_keys</code> write and <code>devices:core</code> write.</p>
-          <p>Required ACL: <code>tagOwners</code> must allow your tags (default <code>tag:devbox</code>).</p>
+          <p>Required ACL: <code>tagOwners</code> must allow your tags (default <code>tag:devcontainer</code>).</p>
         </div>
       </Card.Description>
     </Card.Header>
@@ -142,10 +145,11 @@
       {#if !currentTailnetConfig && !editing}
         <!-- No config: show form directly -->
         <form onsubmit={saveConfig} class="space-y-3">
-          <div class="grid gap-3 sm:grid-cols-3">
+          <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Input bind:value={formTailnet} required placeholder="Tailnet ID (e.g. example.com)" class="h-8 bg-muted/50 font-mono text-sm" />
             <Input bind:value={formClientId} required placeholder="OAuth client ID" class="h-8 bg-muted/50 font-mono text-sm" />
             <Input bind:value={formClientSecret} required placeholder="OAuth client secret" type="password" class="h-8 bg-muted/50 font-mono text-sm" />
+            <Input bind:value={formTags} required placeholder="Tags CSV (e.g. tag:devcontainer)" class="h-8 bg-muted/50 font-mono text-sm" />
           </div>
           <div class="flex gap-2">
             <Button type="submit" variant="outline" size="sm" class="h-8 border-primary/40 text-primary hover:bg-primary/10 hover:text-primary" disabled={saving}>
@@ -156,10 +160,11 @@
       {:else if editing}
         <!-- Edit form -->
         <form onsubmit={saveConfig} class="space-y-3">
-          <div class="grid gap-3 sm:grid-cols-3">
+          <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Input bind:value={formTailnet} required placeholder="Tailnet ID (e.g. example.com)" class="h-8 bg-muted/50 font-mono text-sm" />
             <Input bind:value={formClientId} required placeholder="OAuth client ID" class="h-8 bg-muted/50 font-mono text-sm" />
             <Input bind:value={formClientSecret} required placeholder="OAuth client secret" type="password" class="h-8 bg-muted/50 font-mono text-sm" />
+            <Input bind:value={formTags} required placeholder="Tags CSV (e.g. tag:devcontainer)" class="h-8 bg-muted/50 font-mono text-sm" />
           </div>
           <div class="flex gap-2">
             <Button type="submit" variant="outline" size="sm" class="h-8 border-primary/40 text-primary hover:bg-primary/10 hover:text-primary" disabled={saving}>
@@ -174,7 +179,7 @@
         <!-- Read-only display -->
         <div class="space-y-3">
           <div class="rounded-md border border-border bg-muted/30 px-3 py-2.5">
-            <div class="grid gap-2 sm:grid-cols-3">
+            <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
               <div>
                 <span class="text-xs text-muted-foreground">Tailnet</span>
                 <p class="font-mono text-sm text-foreground">{currentTailnetConfig.tailnet}</p>
@@ -186,6 +191,10 @@
               <div>
                 <span class="text-xs text-muted-foreground">OAuth Client Secret</span>
                 <p class="font-mono text-sm text-foreground">{maskSecret(currentTailnetConfig.oauthClientSecret)}</p>
+              </div>
+              <div>
+                <span class="text-xs text-muted-foreground">Tags CSV</span>
+                <p class="font-mono text-sm text-foreground">{currentTailnetConfig.tagsCsv}</p>
               </div>
             </div>
           </div>

@@ -123,7 +123,7 @@ export function buildCliProgram(client: CliApiClient): Command {
     .requiredOption('--tailnet <tailnet>', 'Tailscale Tailnet ID (Admin > Settings > General)')
     .requiredOption('--client-id <id>', 'OAuth client ID')
     .requiredOption('--client-secret <secret>', 'OAuth client secret')
-    .option('--tags <csv>', 'comma-separated tags (must be allowed by ACL tagOwners)', 'tag:devbox')
+    .option('--tags <csv>', 'comma-separated tags (must be allowed by ACL tagOwners)', 'tag:devcontainer')
     .option('--hostname-prefix <prefix>', 'hostname prefix', 'devbox')
     .option('--authkey-expiry <seconds>', 'auth key expiry in seconds', (v) =>
       parsePositiveIntegerOption('--authkey-expiry', v)
@@ -135,8 +135,8 @@ export function buildCliProgram(client: CliApiClient): Command {
         'Requirements:',
         '- Tailnet value: use Tailnet ID from Admin > Settings > General',
         '- OAuth scopes: auth_keys (write), devices:core (write)',
-        '- ACL tagOwners must allow configured tags (default tag:devbox)',
-        '- Example tagOwners: {"tagOwners":{"tag:devbox":["autogroup:admin","tag:devbox"]}}'
+        '- ACL tagOwners must allow configured tags (default tag:devcontainer)',
+        '- Example tagOwners: {"tagOwners":{"tag:devcontainer":["autogroup:admin","tag:devcontainer"]}}'
       ].join('\n')
     )
     .action(async (options: {

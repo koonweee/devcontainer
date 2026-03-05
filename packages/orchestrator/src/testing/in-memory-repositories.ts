@@ -81,7 +81,7 @@ export class InMemoryTailnetConfigRepository implements TailnetConfigRepository 
       tailnet: input.tailnet,
       oauthClientId: input.oauthClientId,
       oauthClientSecret: input.oauthClientSecret,
-      tagsCsv: input.tagsCsv ?? 'tag:devbox',
+      tagsCsv: input.tagsCsv ?? 'tag:devcontainer',
       hostnamePrefix: input.hostnamePrefix ?? 'devbox',
       authkeyExpirySeconds: input.authkeyExpirySeconds ?? 600,
       createdAt: this.config?.createdAt ?? timestamp,
