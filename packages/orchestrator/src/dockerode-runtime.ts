@@ -59,6 +59,36 @@ function parseLogLine(line: string): { timestamp: string; message: string } | nu
   };
 }
 
+function parseMuxedLogBuffer(
+  input: Buffer
+): Array<{ stream: 'stdout' | 'stderr'; payload: string }> | null {
+  const frames: Array<{ stream: 'stdout' | 'stderr'; payload: string }> = [];
+  let offset = 0;
+
+  while (offset < input.length) {
+    if (offset + 8 > input.length) {
+      return null;
+    }
+
+    const streamType = input[offset];
+    const size = input.readUInt32BE(offset + 4);
+    const payloadStart = offset + 8;
+    const payloadEnd = payloadStart + size;
+    if (payloadEnd > input.length) {
+      return null;
+    }
+
+    const stream: 'stdout' | 'stderr' = streamType === 2 ? 'stderr' : 'stdout';
+    frames.push({
+      stream,
+      payload: input.toString('utf8', payloadStart, payloadEnd)
+    });
+    offset = payloadEnd;
+  }
+
+  return frames;
+}
+
 interface DockerContainerEventPayload {
   id?: string;
   Action?: string;
@@ -211,9 +241,43 @@ export class DockerodeRuntime implements DockerRuntime {
           tail
         });
 
-    if (Buffer.isBuffer(raw) || typeof raw === 'string') {
-      const text = Buffer.isBuffer(raw) ? raw.toString('utf8') : raw;
+    if (Buffer.isBuffer(raw)) {
+      const parsedFrames = parseMuxedLogBuffer(raw);
+      if (parsedFrames) {
+        for (const frame of parsedFrames) {
+          for (const line of frame.payload.split('\n')) {
+            const parsed = parseLogLine(line);
+            if (!parsed) {
+              continue;
+            }
+            yield {
+              stream: frame.stream,
+              timestamp: parsed.timestamp,
+              line: parsed.message
+            };
+          }
+        }
+        return;
+      }
+
+      const text = raw.toString('utf8');
       for (const line of text.split('\n')) {
+        const parsed = parseLogLine(line);
+        if (!parsed) {
+          continue;
+        }
+        yield {
+          stream: 'stdout',
+          timestamp: parsed.timestamp,
+          line: parsed.message
+        };
+      }
+      return;
+    }
+
+    const rawAsString = typeof (raw as unknown) === 'string' ? (raw as unknown as string) : null;
+    if (rawAsString !== null) {
+      for (const line of rawAsString.split('\n')) {
         const parsed = parseLogLine(line);
         if (!parsed) {
           continue;

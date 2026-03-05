@@ -118,4 +118,43 @@ describe('DockerodeRuntime', () => {
       })
     );
   });
+
+  it('parses multiplexed non-follow buffer logs into stdout and stderr lines', async () => {
+    const stdoutPayload = '2026-03-01T00:00:00.000000000Z out line\n';
+    const stderrPayload = '2026-03-01T00:00:01.000000000Z err line\n';
+    const stdout = Buffer.from(stdoutPayload, 'utf8');
+    const stderr = Buffer.from(stderrPayload, 'utf8');
+
+    const stdoutHeader = Buffer.alloc(8);
+    stdoutHeader[0] = 1;
+    stdoutHeader.writeUInt32BE(stdout.length, 4);
+
+    const stderrHeader = Buffer.alloc(8);
+    stderrHeader[0] = 2;
+    stderrHeader.writeUInt32BE(stderr.length, 4);
+
+    const logs = vi.fn().mockResolvedValue(Buffer.concat([stdoutHeader, stdout, stderrHeader, stderr]));
+    const runtime = new DockerodeRuntime({
+      getContainer: vi.fn().mockReturnValue({ logs }),
+      modem: { demuxStream: vi.fn() }
+    } as unknown as Dockerode);
+
+    const received = [];
+    for await (const event of runtime.streamContainerLogs('container-logs', { follow: false })) {
+      received.push(event);
+    }
+
+    expect(received).toEqual([
+      {
+        stream: 'stdout',
+        timestamp: '2026-03-01T00:00:00.000000000Z',
+        line: 'out line'
+      },
+      {
+        stream: 'stderr',
+        timestamp: '2026-03-01T00:00:01.000000000Z',
+        line: 'err line'
+      }
+    ]);
+  });
 });

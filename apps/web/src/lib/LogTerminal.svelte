@@ -36,7 +36,8 @@
     }
   }
 
-  $: {
+  $: if (terminal) {
+    lines;
     syncTerminal();
   }
 
