@@ -1,0 +1,30 @@
+{
+  "name": "@devbox/orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./errors": "./src/errors.ts",
+    "./events": "./src/events.ts",
+    "./factory": "./src/factory.ts",
+    "./dockerode-runtime": "./src/dockerode-runtime.ts",
+    "./in-memory-repositories": "./src/in-memory-repositories.ts",
+    "./job-runner": "./src/job-runner.ts",
+    "./mock-runtime": "./src/mock-runtime.ts",
+    "./orchestrator": "./src/orchestrator.ts",
+    "./types": "./src/types.ts",
+    "./validation": "./src/validation.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "dockerode": "^4.0.9"
+  },
+  "devDependencies": {
+    "@types/dockerode": "^3.3.44"
+  }
+}

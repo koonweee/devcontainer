@@ -1,5 +1,5 @@
 ---
-status: planned
+status: implemented
 owner: codex
 created: 2026-03-05
 updated: 2026-03-05
