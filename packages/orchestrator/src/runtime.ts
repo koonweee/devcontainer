@@ -44,6 +44,17 @@ export interface RuntimeLogOptions {
   since?: string;
 }
 
+export interface RuntimeEventOptions {
+  signal?: AbortSignal;
+}
+
+export interface ContainerRuntimeEvent {
+  containerId: string;
+  action: string;
+  labels: Record<string, string>;
+  timestamp: string;
+}
+
 export interface DockerRuntime {
   createNetwork(name: string, labels: Record<string, string>): Promise<void>;
   createVolume(name: string, labels: Record<string, string>): Promise<void>;
@@ -58,6 +69,7 @@ export interface DockerRuntime {
     containerId: string,
     options: RuntimeLogOptions
   ): AsyncIterable<RuntimeLogLine>;
+  streamContainerEvents(options?: RuntimeEventOptions): AsyncIterable<ContainerRuntimeEvent>;
 }
 
 export function managedLabels(boxId: string): Record<string, string> {

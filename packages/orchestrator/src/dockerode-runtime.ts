@@ -4,12 +4,15 @@ import { createInterface } from 'node:readline';
 import Dockerode from 'dockerode';
 
 import type {
+  ContainerRuntimeEvent,
   ContainerDetails,
   CreateContainerOptions,
   DockerRuntime,
   RuntimeLogLine,
+  RuntimeEventOptions,
   RuntimeLogOptions
 } from './runtime.js';
+import { MANAGED_LABELS, MANAGED_OWNER } from './runtime.js';
 
 function parseSince(input: string | undefined): number | undefined {
   if (!input) {
@@ -43,6 +46,18 @@ function parseLogLine(line: string): { timestamp: string; message: string } | nu
   return {
     timestamp,
     message: parts.join(' ')
+  };
+}
+
+interface DockerContainerEventPayload {
+  id?: string;
+  Action?: string;
+  status?: string;
+  time?: number;
+  timeNano?: number;
+  Actor?: {
+    ID?: string;
+    Attributes?: Record<string, string>;
   };
 }
 
@@ -259,6 +274,64 @@ export class DockerodeRuntime implements DockerRuntime {
 
     if (streamError) {
       throw streamError;
+    }
+  }
+
+  async *streamContainerEvents(
+    options: RuntimeEventOptions = {}
+  ): AsyncIterable<ContainerRuntimeEvent> {
+    const stream = (await this.docker.getEvents({
+      filters: {
+        type: ['container'],
+        label: [
+          `${MANAGED_LABELS.managed}=true`,
+          `${MANAGED_LABELS.owner}=${MANAGED_OWNER}`
+        ]
+      },
+      abortSignal: options.signal
+    })) as NodeJS.ReadableStream & { destroy?: () => void };
+    const reader = createInterface({ input: stream as Readable });
+
+    try {
+      for await (const line of reader) {
+        const trimmed = line.trim();
+        if (!trimmed) {
+          continue;
+        }
+
+        let payload: DockerContainerEventPayload;
+        try {
+          payload = JSON.parse(trimmed) as DockerContainerEventPayload;
+        } catch {
+          continue;
+        }
+
+        const attributes = payload.Actor?.Attributes ?? {};
+        const containerId = payload.id ?? payload.Actor?.ID;
+        const action = payload.Action ?? payload.status;
+        if (!containerId || !action) {
+          continue;
+        }
+
+        const timestamp =
+          payload.timeNano !== undefined
+            ? new Date(Math.floor(payload.timeNano / 1_000_000)).toISOString()
+            : payload.time !== undefined
+              ? new Date(payload.time * 1_000).toISOString()
+              : new Date().toISOString();
+
+        yield {
+          containerId,
+          action,
+          labels: attributes,
+          timestamp
+        };
+      }
+    } finally {
+      reader.close();
+      if (typeof stream.destroy === 'function') {
+        stream.destroy();
+      }
     }
   }
 }

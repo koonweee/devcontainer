@@ -1,8 +1,10 @@
 import type {
+  ContainerRuntimeEvent,
   ContainerDetails,
   ContainerRuntimeStatus,
   CreateContainerOptions,
   DockerRuntime,
+  RuntimeEventOptions,
   RuntimeLogLine,
   RuntimeLogOptions
 } from '../runtime.js';
@@ -21,6 +23,8 @@ export class MockDockerRuntime implements DockerRuntime {
   readonly containers = new Map<string, FakeContainer>();
   lastCreateContainerOptions: CreateContainerOptions | null = null;
   failOn: Partial<Record<keyof DockerRuntime, Error>> = {};
+  private readonly containerEvents: ContainerRuntimeEvent[] = [];
+  private readonly eventWaiters: Array<() => void> = [];
 
   private containerCounter = 0;
 
@@ -105,6 +109,38 @@ export class MockDockerRuntime implements DockerRuntime {
     }
   }
 
+  async *streamContainerEvents(
+    options: RuntimeEventOptions = {}
+  ): AsyncIterable<ContainerRuntimeEvent> {
+    this.throwIfConfigured('streamContainerEvents');
+
+    while (true) {
+      if (options.signal?.aborted) {
+        return;
+      }
+
+      const next = this.containerEvents.shift();
+      if (next) {
+        yield next;
+        continue;
+      }
+
+      await new Promise<void>((resolve) => {
+        const onAbort = () => {
+          options.signal?.removeEventListener('abort', onAbort);
+          resolve();
+        };
+        if (options.signal) {
+          options.signal.addEventListener('abort', onAbort, { once: true });
+        }
+        this.eventWaiters.push(() => {
+          options.signal?.removeEventListener('abort', onAbort);
+          resolve();
+        });
+      });
+    }
+  }
+
   pushLog(containerId: string, log: RuntimeLogLine): void {
     const container = this.containers.get(containerId);
     if (!container) {
@@ -121,9 +157,20 @@ export class MockDockerRuntime implements DockerRuntime {
     container.status = status;
   }
 
+  emitContainerEvent(event: ContainerRuntimeEvent): void {
+    this.containerEvents.push(event);
+    const waiter = this.eventWaiters.shift();
+    if (waiter) {
+      waiter();
+    }
+  }
+
   private throwIfConfigured(method: keyof DockerRuntime): void {
     const error = this.failOn[method];
     if (error) {
+      if (method === 'streamContainerEvents') {
+        delete this.failOn.streamContainerEvents;
+      }
       throw error;
     }
   }

@@ -67,10 +67,7 @@ program
     const stream = await client.streamBoxLogs(box.id, { follow: options.follow });
 
     for await (const event of stream) {
-      if (event.event !== 'box.logs') {
-        continue;
-      }
-      const payload = event.data as { timestamp?: string; stream?: string; line?: string };
+      const payload = event.data;
       console.log(`[${payload.timestamp}] ${payload.stream}: ${payload.line}`);
     }
   });

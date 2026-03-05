@@ -18,6 +18,39 @@ export interface SseEvent<T = unknown> {
   data: T;
 }
 
+export interface ReadyEvent extends SseEvent<{ timestamp: string }> {
+  event: 'ready';
+}
+
+export interface HeartbeatEvent extends SseEvent<{ timestamp: string }> {
+  event: 'heartbeat';
+}
+
+export interface JobUpdatedEvent extends SseEvent<{ type: 'job.updated'; job: Job }> {
+  event: 'job.updated';
+}
+
+export interface BoxUpdatedEvent extends SseEvent<{ type: 'box.updated'; box: Box }> {
+  event: 'box.updated';
+}
+
+export interface BoxLogEvent {
+  boxId: string;
+  stream: 'stdout' | 'stderr';
+  line: string;
+  timestamp: string;
+}
+
+export interface BoxLogsEvent extends SseEvent<BoxLogEvent> {
+  event: 'box.logs';
+}
+
+export type ApiStreamEvent =
+  | ReadyEvent
+  | HeartbeatEvent
+  | JobUpdatedEvent
+  | BoxUpdatedEvent;
+
 export interface ApiClientOptions {
   baseUrl: string;
   fetchImpl?: typeof fetch;
@@ -69,7 +102,7 @@ function unwrap<T>(result: { data?: T; error?: unknown; response: Response }): T
   return result.data;
 }
 
-async function* parseSse<T>(response: Response): AsyncIterable<SseEvent<T>> {
+async function* parseSse<TEvent extends SseEvent>(response: Response): AsyncIterable<TEvent> {
   if (!response.ok) {
     throw new Error(`Failed SSE request: ${response.status}`);
   }
@@ -88,8 +121,8 @@ async function* parseSse<T>(response: Response): AsyncIterable<SseEvent<T>> {
 
     yield {
       event: value.type,
-      data: JSON.parse(value.data) as T
-    };
+      data: JSON.parse(value.data) as unknown
+    } as TEvent;
   }
 }
 
@@ -100,16 +133,20 @@ export function createApiClient(options: ApiClientOptions) {
     fetch: fetchImpl
   });
 
-  async function sse<T>(
+  async function sse<TEvent extends SseEvent>(
     path: string,
-    query?: Record<string, string | number | boolean | undefined>
-  ): Promise<AsyncIterable<SseEvent<T>>> {
-    const response = await fetchImpl(buildUrl(options.baseUrl, path, query), {
+    requestOptions?: {
+      query?: Record<string, string | number | boolean | undefined>;
+      signal?: AbortSignal;
+    }
+  ): Promise<AsyncIterable<TEvent>> {
+    const response = await fetchImpl(buildUrl(options.baseUrl, path, requestOptions?.query), {
       headers: {
         accept: 'text/event-stream'
-      }
+      },
+      signal: requestOptions?.signal
     });
-    return parseSse<T>(response);
+    return parseSse<TEvent>(response);
   }
 
   return {
@@ -141,14 +178,24 @@ export function createApiClient(options: ApiClientOptions) {
       return unwrap(await client.GET('/v1/jobs/{jobId}', { params: { path: { jobId } } }));
     },
 
-    streamEvents(): Promise<AsyncIterable<SseEvent>> {
-      return sse('/v1/events');
+    streamEvents(options?: { signal?: AbortSignal }): Promise<AsyncIterable<ApiStreamEvent>> {
+      return sse<ApiStreamEvent>('/v1/events', options);
     },
 
-    streamBoxLogs(boxId: string, options?: { follow?: boolean; since?: string }): Promise<
-      AsyncIterable<SseEvent>
-    > {
-      return sse(`/v1/boxes/${boxId}/logs`, options);
+    streamBoxLogs(
+      boxId: string,
+      options?: { follow?: boolean; since?: string; signal?: AbortSignal }
+    ): Promise<AsyncIterable<BoxLogsEvent>> {
+      const query = options
+        ? {
+            follow: options.follow,
+            since: options.since
+          }
+        : undefined;
+      return sse<BoxLogsEvent>(`/v1/boxes/${boxId}/logs`, {
+        query,
+        signal: options?.signal
+      });
     }
   };
 }

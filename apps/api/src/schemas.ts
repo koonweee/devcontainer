@@ -10,6 +10,7 @@ export const BoxSchema = Type.Object(
       Type.Literal('running'),
       Type.Literal('stopping'),
       Type.Literal('stopped'),
+      Type.Literal('orphaned'),
       Type.Literal('removing'),
       Type.Literal('error')
     ]),

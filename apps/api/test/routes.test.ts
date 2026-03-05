@@ -186,6 +186,71 @@ describe('API routes', () => {
     await app.close();
   });
 
+  it('emits box.updated over SSE when runtime monitor reconciles external container changes', async () => {
+    const harness = buildInMemoryHarness();
+    const app = await buildApp({ orchestrator: harness.orchestrator, heartbeatMs: 50 });
+    const address = await app.listen({ host: '127.0.0.1', port: 0 });
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/v1/boxes',
+      payload: {
+        name: 'runtime-monitor-sse-box'
+      }
+    });
+    const created = createRes.json() as { box: { id: string }; job: { id: string } };
+    await waitForTerminalJob(app, created.job.id);
+
+    const box = await harness.orchestrator.getBox(created.box.id);
+    if (!box?.containerId) {
+      throw new Error('Expected container id for runtime monitor SSE test');
+    }
+
+    const response = await fetch(`${address}/v1/events`);
+    if (!response.body) {
+      throw new Error('Expected SSE response body');
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+
+    harness.runtime.setContainerStatus(box.containerId, 'exited');
+    harness.runtime.emitContainerEvent({
+      containerId: box.containerId,
+      action: 'die',
+      labels: {
+        'com.devbox.managed': 'true',
+        'com.devbox.box_id': box.id,
+        'com.devbox.owner': 'orchestrator'
+      },
+      timestamp: new Date().toISOString()
+    });
+
+    let payload = '';
+    const deadline = Date.now() + 3_000;
+    while (Date.now() < deadline) {
+      const read = await Promise.race([
+        reader.read(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('timed out reading monitor SSE')), 500)
+        )
+      ]);
+
+      payload += decoder.decode(read.value ?? new Uint8Array(), { stream: true });
+      if (payload.includes('event: box.updated') && payload.includes('"status":"stopped"')) {
+        break;
+      }
+      if (read.done) {
+        break;
+      }
+    }
+
+    expect(payload).toContain('event: box.updated');
+    expect(payload).toContain('"status":"stopped"');
+
+    reader.cancel().catch(() => undefined);
+    await app.close();
+  });
+
   it('returns 404 for missing box log streams before hijacking SSE', async () => {
     const app = await buildApp({ orchestrator: buildInMemoryOrchestrator() });
 

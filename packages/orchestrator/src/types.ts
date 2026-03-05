@@ -3,6 +3,7 @@ export type BoxStatus =
   | 'running'
   | 'stopping'
   | 'stopped'
+  | 'orphaned'
   | 'removing'
   | 'error';
 

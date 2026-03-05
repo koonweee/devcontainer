@@ -12,7 +12,6 @@
 
   onMount(() => {
     let disconnect: (() => void) | undefined;
-    store.refresh().catch(() => undefined);
     store.connectEvents().then((stopEvents) => {
       disconnect = stopEvents;
     });

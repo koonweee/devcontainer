@@ -70,6 +70,7 @@ export async function buildApp(options?: BuildAppOptions) {
     const { createOrchestrator } = await import('@devbox/orchestrator/factory');
     orchestrator = createOrchestrator();
   }
+  await orchestrator.startRuntimeStatusMonitor();
   const heartbeatMs = options?.heartbeatMs ?? 15_000;
   const corsOrigin = options?.corsOrigin ?? process.env.DEVBOX_WEB_ORIGIN ?? 'http://localhost:4173';
 
@@ -255,6 +256,10 @@ export async function buildApp(options?: BuildAppOptions) {
 
     reply.raw.on('close', cleanup);
     reply.raw.on('error', cleanup);
+  });
+
+  app.addHook('onClose', async () => {
+    await orchestrator.stopRuntimeStatusMonitor();
   });
 
   return app;

@@ -351,7 +351,7 @@ export interface components {
             id: string;
             name: string;
             image: string;
-            status: "creating" | "running" | "stopping" | "stopped" | "removing" | "error";
+            status: "creating" | "running" | "stopping" | "stopped" | "orphaned" | "removing" | "error";
             containerId: string | null;
             networkName: string;
             volumeName: string;

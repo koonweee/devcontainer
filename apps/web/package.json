@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-    "test": "echo 'no tests'"
+    "test": "vitest run --config vitest.config.ts"
   },
   "dependencies": {
     "@devbox/api-client": "0.1.0",

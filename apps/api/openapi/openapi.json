@@ -60,6 +60,12 @@
               {
                 "type": "string",
                 "enum": [
+                  "orphaned"
+                ]
+              },
+              {
+                "type": "string",
+                "enum": [
                   "removing"
                 ]
               },

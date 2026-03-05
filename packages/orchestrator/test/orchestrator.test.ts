@@ -4,6 +4,7 @@ import { OrchestratorEvents } from '../src/events.js';
 import { JobRunner } from '../src/job-runner.js';
 import { DevboxOrchestrator } from '../src/orchestrator.js';
 import { ValidationError } from '../src/errors.js';
+import { managedLabels } from '../src/runtime.js';
 import { InMemoryBoxRepository, InMemoryJobRepository } from '../src/testing/in-memory-repositories.js';
 import { MockDockerRuntime } from '../src/testing/mock-runtime.js';
 
@@ -23,6 +24,20 @@ async function waitForJob(
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error(`Timed out waiting for job ${jobId}`);
+}
+
+async function waitForCondition(
+  check: () => Promise<boolean> | boolean,
+  timeoutMs = 2_000
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await check()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error('Timed out waiting for condition');
 }
 
 function buildHarness(
@@ -52,7 +67,7 @@ function buildHarness(
 
 describe('DevboxOrchestrator', () => {
   it('runs create -> running state transition and creates managed resources', async () => {
-    const { runtime, orchestrator } = buildHarness();
+    const { runtime, orchestrator, boxes } = buildHarness();
 
     const { box, job } = await orchestrator.createBox({
       name: 'box-alpha'
@@ -196,7 +211,7 @@ describe('DevboxOrchestrator', () => {
     expect(persisted?.status).toBe('stopped');
   });
 
-  it('marks boxes as error and clears container id when inspect returns not found', async () => {
+  it('marks boxes as orphaned and clears container id when inspect returns not found', async () => {
     const { runtime, orchestrator } = buildHarness();
     const created = await orchestrator.createBox({
       name: 'box-golf'
@@ -210,7 +225,7 @@ describe('DevboxOrchestrator', () => {
 
     runtime.containers.delete(initial.containerId);
     const reconciled = await orchestrator.getBox(created.box.id);
-    expect(reconciled?.status).toBe('error');
+    expect(reconciled?.status).toBe('orphaned');
     expect(reconciled?.containerId).toBeNull();
   });
 
@@ -310,5 +325,155 @@ describe('DevboxOrchestrator', () => {
 
     expect(reconciled?.status).toBe('stopped');
     expect(boxUpdatedEvents).toBe(0);
+  });
+
+  it('updates running boxes on external runtime events and emits box.updated once', async () => {
+    const { runtime, orchestrator, boxes } = buildHarness();
+    const created = await orchestrator.createBox({ name: 'box-mike' });
+    await waitForJob(orchestrator, created.job.id);
+
+    const initial = await orchestrator.getBox(created.box.id);
+    if (!initial?.containerId) {
+      throw new Error('Expected container id');
+    }
+
+    await orchestrator.startRuntimeStatusMonitor();
+
+    let boxUpdatedEvents = 0;
+    const unsubscribe = orchestrator.events.subscribe((event) => {
+      if (event.type === 'box.updated') {
+        boxUpdatedEvents += 1;
+      }
+    });
+
+    runtime.setContainerStatus(initial.containerId, 'exited');
+    runtime.emitContainerEvent({
+      containerId: initial.containerId,
+      action: 'die',
+      labels: managedLabels(created.box.id),
+      timestamp: new Date().toISOString()
+    });
+
+    await waitForCondition(() => boxes.get(created.box.id)?.status === 'stopped');
+
+    unsubscribe();
+    await orchestrator.stopRuntimeStatusMonitor();
+
+    expect(boxUpdatedEvents).toBe(1);
+  });
+
+  it('does not emit duplicate updates when runtime event does not change status', async () => {
+    const { runtime, orchestrator, boxes } = buildHarness();
+    const created = await orchestrator.createBox({ name: 'box-november' });
+    await waitForJob(orchestrator, created.job.id);
+
+    const initial = await orchestrator.getBox(created.box.id);
+    if (!initial?.containerId) {
+      throw new Error('Expected container id');
+    }
+
+    await orchestrator.startRuntimeStatusMonitor();
+
+    let boxUpdatedEvents = 0;
+    const unsubscribe = orchestrator.events.subscribe((event) => {
+      if (event.type === 'box.updated') {
+        boxUpdatedEvents += 1;
+      }
+    });
+
+    runtime.emitContainerEvent({
+      containerId: initial.containerId,
+      action: 'start',
+      labels: managedLabels(created.box.id),
+      timestamp: new Date().toISOString()
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    unsubscribe();
+    await orchestrator.stopRuntimeStatusMonitor();
+
+    expect((await orchestrator.getBox(created.box.id))?.status).toBe('running');
+    expect(boxUpdatedEvents).toBe(0);
+  });
+
+  it('reconnects runtime monitor after stream failures and resumes reconciliation', async () => {
+    const { runtime, orchestrator, boxes } = buildHarness();
+    const created = await orchestrator.createBox({ name: 'box-oscar' });
+    await waitForJob(orchestrator, created.job.id);
+
+    const initial = await orchestrator.getBox(created.box.id);
+    if (!initial?.containerId) {
+      throw new Error('Expected container id');
+    }
+
+    runtime.failOn.streamContainerEvents = new Error('stream unavailable');
+    await orchestrator.startRuntimeStatusMonitor();
+
+    runtime.setContainerStatus(initial.containerId, 'exited');
+    runtime.emitContainerEvent({
+      containerId: initial.containerId,
+      action: 'die',
+      labels: managedLabels(created.box.id),
+      timestamp: new Date().toISOString()
+    });
+
+    await waitForCondition(() => boxes.get(created.box.id)?.status === 'stopped', 5_000);
+    await orchestrator.stopRuntimeStatusMonitor();
+  });
+
+  it('does not override transitional statuses from runtime monitor events', async () => {
+    const { runtime, orchestrator, boxes } = buildHarness();
+    const created = await orchestrator.createBox({ name: 'box-papa' });
+    await waitForJob(orchestrator, created.job.id);
+
+    const initial = await orchestrator.getBox(created.box.id);
+    if (!initial?.containerId) {
+      throw new Error('Expected container id');
+    }
+
+    boxes.update(created.box.id, { status: 'creating' });
+    await orchestrator.startRuntimeStatusMonitor();
+
+    runtime.setContainerStatus(initial.containerId, 'exited');
+    runtime.emitContainerEvent({
+      containerId: initial.containerId,
+      action: 'die',
+      labels: managedLabels(created.box.id),
+      timestamp: new Date().toISOString()
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await orchestrator.stopRuntimeStatusMonitor();
+
+    expect((await orchestrator.getBox(created.box.id))?.status).toBe('creating');
+  });
+
+  it('maps external destroy events to orphaned with cleared container id', async () => {
+    const { runtime, orchestrator, boxes } = buildHarness();
+    const created = await orchestrator.createBox({ name: 'box-quebec' });
+    await waitForJob(orchestrator, created.job.id);
+
+    const initial = await orchestrator.getBox(created.box.id);
+    if (!initial?.containerId) {
+      throw new Error('Expected container id');
+    }
+
+    await orchestrator.startRuntimeStatusMonitor();
+
+    runtime.containers.delete(initial.containerId);
+    runtime.emitContainerEvent({
+      containerId: initial.containerId,
+      action: 'destroy',
+      labels: managedLabels(created.box.id),
+      timestamp: new Date().toISOString()
+    });
+
+    await waitForCondition(() => {
+      const current = boxes.get(created.box.id);
+      return current?.status === 'orphaned' && current.containerId === null;
+    });
+
+    await orchestrator.stopRuntimeStatusMonitor();
   });
 });
