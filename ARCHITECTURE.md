@@ -24,6 +24,7 @@ flowchart LR
 - API CORS: API allows browser calls from the configured web origin (`DEVBOX_WEB_ORIGIN`, default `http://localhost:4173`) for REST and SSE endpoints.
 - SQLite schema: [`packages/orchestrator/src/repositories.ts`] enforces active box-name uniqueness with a partial unique index (`WHERE deleted_at IS NULL`) and migrates legacy global-unique schemas.
 - Shared API contract client: [`packages/api-client/src`] is generated from API OpenAPI output, uses `openapi-fetch` for typed REST calls and `parse-sse` for event streams, and is used by both web and CLI.
+- CI guardrail: [`.github/workflows/ci.yml`] runs baseline checks (`lint`, `test`, `build`, and `check:client`) on pull requests and pushes to `main`.
 - Test doubles: [`packages/orchestrator/src/testing`] contains in-memory repositories and mock Docker runtime, exported only through `@devbox/orchestrator/testing`.
 - Web app: [`apps/web/src/routes/+page.server.ts`] does initial SSR fetch only, then [`apps/web/src/lib/devbox-store.ts`] uses SSE for live updates.
 - CLI app: [`apps/cli/src/index.ts`] resolves boxes and runs create/list/stop/remove/logs exclusively through API calls.

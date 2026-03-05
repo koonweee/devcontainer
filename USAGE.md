@@ -7,6 +7,7 @@
 5. Start stack: `docker compose up --build`.
 6. Optional local app-only runs: `npm run -w @devbox/api dev` and `npm run -w @devbox/web dev`.
 7. Verify changes: `npm run typecheck && npm run test`.
+8. Match CI locally before opening a PR: `npm run lint && npm run test && npm run build && npm run check:client`.
 
 ### For deployment
 1. Configure runtime values in `ENV.md` (usually `DEVBOX_PUBLIC_API_URL`, `DEVBOX_INTERNAL_API_URL`, `DEVBOX_API_URL`, `DEVBOX_DB_PATH`).
