@@ -84,3 +84,9 @@
    - API: `DELETE /v1/boxes/:boxId`
    - Behavior: API remove cleans up the workspace container, per-box network, and per-box volume.
    - CLI: `npm run -w @devbox/cli start -- rm <boxId|name>`
+
+## Networking and isolation guarantees
+- The platform does not publish box services on Docker host ports, does not use host networking for boxes, does not attach boxes to arbitrary shared Docker networks, and does not provide expose-service, reverse-proxy, tunnel, or sidecar helpers for boxes.
+- Platform-managed access is limited to the box's Tailscale identity. The orchestrator also does not mount `docker.sock` or other host bind mounts into boxes.
+- These guarantees apply at the orchestrator/Docker boundary. A privileged developer inside a box may still intentionally widen that box's own reachability by running software inside the box.
+- That box-local behavior is out of scope for platform enforcement, but it should not let the box affect the Docker host, the orchestrator, or other boxes through the platform layer.

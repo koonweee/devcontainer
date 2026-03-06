@@ -1,8 +1,9 @@
+import { buildBoxContainerCreateRequest } from '../box-runtime.js';
 import type {
   ContainerRuntimeEvent,
   ContainerDetails,
   ContainerRuntimeStatus,
-  CreateContainerOptions,
+  CreateBoxContainerOptions,
   DockerRuntime,
   RuntimeEventOptions,
   RuntimeLogLine,
@@ -10,12 +11,9 @@ import type {
 } from '../runtime.js';
 
 interface FakeContainer {
-  id: string;
-  name: string;
-  labels: Record<string, string>;
-  status: ContainerRuntimeStatus;
+  details: ContainerDetails;
   logs: RuntimeLogLine[];
-  options: CreateContainerOptions;
+  options: CreateBoxContainerOptions;
 }
 
 /** Simulates Docker runtime behavior without touching Docker Engine. */
@@ -24,7 +22,7 @@ export class MockDockerRuntime implements DockerRuntime {
   readonly volumes = new Set<string>();
   readonly containers = new Map<string, FakeContainer>();
   readonly operations: string[] = [];
-  lastCreateContainerOptions: CreateContainerOptions | null = null;
+  lastCreateBoxContainerOptions: CreateBoxContainerOptions | null = null;
   lastStreamContainerLogsOptions: RuntimeLogOptions | null = null;
   lastStreamContainerLogsContainerId: string | null = null;
   lastStreamContainerLogsSignal: AbortSignal | null = null;
@@ -48,17 +46,32 @@ export class MockDockerRuntime implements DockerRuntime {
     this.volumes.add(name);
   }
 
-  async createContainer(options: CreateContainerOptions): Promise<string> {
-    this.throwIfConfigured('createContainer');
-    this.operations.push(`createContainer:${options.name}`);
-    this.lastCreateContainerOptions = options;
+  async createBoxContainer(options: CreateBoxContainerOptions): Promise<string> {
+    this.throwIfConfigured('createBoxContainer');
+    this.operations.push(`createBoxContainer:${options.name}`);
+    this.lastCreateBoxContainerOptions = options;
     this.containerCounter += 1;
     const id = `mock-${this.containerCounter}`;
+    const request = buildBoxContainerCreateRequest(options);
     this.containers.set(id, {
-      id,
-      name: options.name,
-      labels: options.labels,
-      status: 'created',
+      details: {
+        id,
+        labels: options.labels,
+        status: 'created',
+        networkMode: options.networkName,
+        attachedNetworks: [options.networkName],
+        publishedPorts: [],
+        exposedPorts: [],
+        mounts: request.HostConfig.Mounts.map((mount) => ({
+          type: mount.Type,
+          source: mount.Source,
+          target: mount.Target,
+          readOnly: mount.ReadOnly
+        })),
+        devices: request.HostConfig.Devices,
+        capAdd: request.HostConfig.CapAdd,
+        privileged: request.HostConfig.Privileged
+      },
       logs: [],
       options
     });
@@ -72,7 +85,7 @@ export class MockDockerRuntime implements DockerRuntime {
     if (!container) {
       return;
     }
-    container.status = 'running';
+    container.details.status = 'running';
   }
 
   async stopContainer(containerId: string): Promise<void> {
@@ -82,7 +95,7 @@ export class MockDockerRuntime implements DockerRuntime {
     if (!container) {
       return;
     }
-    container.status = 'exited';
+    container.details.status = 'exited';
   }
 
   async removeContainer(containerId: string): Promise<void> {
@@ -109,11 +122,7 @@ export class MockDockerRuntime implements DockerRuntime {
     if (!container) {
       return null;
     }
-    return {
-      id: container.id,
-      labels: container.labels,
-      status: container.status
-    };
+    return structuredClone(container.details);
   }
 
   async *streamContainerLogs(
@@ -190,7 +199,18 @@ export class MockDockerRuntime implements DockerRuntime {
     if (!container) {
       return;
     }
-    container.status = status;
+    container.details.status = status;
+  }
+
+  updateContainerDetails(containerId: string, patch: Partial<ContainerDetails>): void {
+    const container = this.containers.get(containerId);
+    if (!container) {
+      return;
+    }
+    container.details = {
+      ...container.details,
+      ...patch
+    };
   }
 
   emitContainerEvent(event: ContainerRuntimeEvent): void {

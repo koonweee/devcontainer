@@ -14,18 +14,18 @@ describe('DockerodeRuntime', () => {
     } as unknown as Dockerode);
 
     await expect(
-      runtime.createContainer({
+      runtime.createBoxContainer({
         name: 'devbox-1',
         image: 'devbox-runtime:local',
-        networkMode: 'net',
-        mounts: [],
+        networkName: 'net',
+        volumeName: 'vol',
         labels: {}
       })
     ).rejects.toThrow('Runtime image not found locally: devbox-runtime:local');
     expect(createContainer).not.toHaveBeenCalled();
   });
 
-  it('passes through mounts, network mode, device, and capability settings', async () => {
+  it('builds the approved box container create payload', async () => {
     const inspect = vi.fn().mockResolvedValue({});
     const createContainer = vi.fn().mockResolvedValue({ id: 'container-123' });
     const runtime = new DockerodeRuntime({
@@ -33,20 +33,116 @@ describe('DockerodeRuntime', () => {
       createContainer
     } as unknown as Dockerode);
 
-    const id = await runtime.createContainer({
+    const id = await runtime.createBoxContainer({
       name: 'devbox-2',
       image: 'runtime:test',
-      networkMode: 'devbox-net-box',
-      mounts: [
-        {
-          Type: 'volume',
-          Source: 'workspace-vol',
-          Target: '/workspace'
-        }
-      ],
+      networkName: 'devbox-net-box',
+      volumeName: 'workspace-vol',
       labels: { one: '1' },
       command: ['sleep', 'infinity'],
-      env: { HELLO: 'world' },
+      env: { HELLO: 'world' }
+    });
+
+    expect(id).toBe('container-123');
+    expect(createContainer).toHaveBeenCalledWith({
+      name: 'devbox-2',
+      Image: 'runtime:test',
+      Cmd: ['sleep', 'infinity'],
+      Env: ['HELLO=world'],
+      Labels: { one: '1' },
+      HostConfig: {
+        Mounts: [
+          {
+            Type: 'volume',
+            Source: 'workspace-vol',
+            Target: '/workspace',
+            ReadOnly: false
+          }
+        ],
+        NetworkMode: 'devbox-net-box',
+        Devices: [
+          {
+            PathOnHost: '/dev/net/tun',
+            PathInContainer: '/dev/net/tun',
+            CgroupPermissions: 'rwm'
+          }
+        ],
+        CapAdd: ['NET_ADMIN', 'NET_RAW'],
+        Privileged: false
+      }
+    });
+
+    const request = createContainer.mock.calls[0][0];
+    expect(request.ExposedPorts).toBeUndefined();
+    expect(request.HostConfig.PortBindings).toBeUndefined();
+    expect(request.HostConfig.PublishAllPorts).toBeUndefined();
+    expect(request.HostConfig.Binds).toBeUndefined();
+    expect(request.HostConfig.ExtraHosts).toBeUndefined();
+    expect(request.HostConfig.Links).toBeUndefined();
+    expect(request.HostConfig.PidMode).toBeUndefined();
+    expect(request.HostConfig.IpcMode).toBeUndefined();
+    expect(request.HostConfig.UTSMode).toBeUndefined();
+  });
+
+  it('maps inspect details needed for box isolation validation', async () => {
+    const inspect = vi.fn().mockResolvedValue({
+      Id: 'container-123',
+      Config: {
+        Labels: { one: '1' },
+        ExposedPorts: {
+          '8080/tcp': {}
+        }
+      },
+      State: {
+        Status: 'running'
+      },
+      HostConfig: {
+        NetworkMode: 'net',
+        Devices: [
+          {
+            PathOnHost: '/dev/net/tun',
+            PathInContainer: '/dev/net/tun',
+            CgroupPermissions: 'rwm'
+          }
+        ],
+        CapAdd: ['NET_ADMIN', 'NET_RAW'],
+        Privileged: false
+      },
+      NetworkSettings: {
+        Networks: {
+          net: {}
+        },
+        Ports: {
+          '8080/tcp': [
+            {
+              HostIp: '0.0.0.0',
+              HostPort: '3000'
+            }
+          ]
+        }
+      },
+      Mounts: [
+        {
+          Type: 'volume',
+          Source: 'vol',
+          Destination: '/workspace',
+          RW: true
+        }
+      ]
+    });
+    const runtime = new DockerodeRuntime({
+      getContainer: vi.fn().mockReturnValue({ inspect })
+    } as unknown as Dockerode);
+
+    await expect(runtime.inspectContainer('container-123')).resolves.toEqual({
+      id: 'container-123',
+      labels: { one: '1' },
+      status: 'running',
+      networkMode: 'net',
+      attachedNetworks: ['net'],
+      publishedPorts: [{ containerPort: '8080/tcp', hostPort: '3000', hostIp: '0.0.0.0' }],
+      exposedPorts: ['8080/tcp'],
+      mounts: [{ type: 'volume', source: 'vol', target: '/workspace', readOnly: false }],
       devices: [
         {
           PathOnHost: '/dev/net/tun',
@@ -55,35 +151,8 @@ describe('DockerodeRuntime', () => {
         }
       ],
       capAdd: ['NET_ADMIN', 'NET_RAW'],
-      capDrop: ['NET_BIND_SERVICE']
+      privileged: false
     });
-
-    expect(id).toBe('container-123');
-    expect(createContainer).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: 'devbox-2',
-        Image: 'runtime:test',
-        HostConfig: expect.objectContaining({
-          NetworkMode: 'devbox-net-box',
-          Mounts: [
-            {
-              Type: 'volume',
-              Source: 'workspace-vol',
-              Target: '/workspace'
-            }
-          ],
-          Devices: [
-            {
-              PathOnHost: '/dev/net/tun',
-              PathInContainer: '/dev/net/tun',
-              CgroupPermissions: 'rwm'
-            }
-          ],
-          CapAdd: ['NET_ADMIN', 'NET_RAW'],
-          CapDrop: ['NET_BIND_SERVICE']
-        })
-      })
-    );
   });
 
   it('streams container runtime events with managed filters', async () => {
@@ -258,5 +327,30 @@ describe('DockerodeRuntime', () => {
       }
     ]);
     expect(demuxStream).toHaveBeenCalled();
+  });
+
+  it('aborts follow log streams by destroying the Docker stream', async () => {
+    const raw = new PassThrough();
+    const destroySpy = vi.spyOn(raw, 'destroy');
+    const logs = vi.fn().mockResolvedValue(raw);
+    const runtime = new DockerodeRuntime({
+      getContainer: vi.fn().mockReturnValue({ logs }),
+      modem: { demuxStream: vi.fn() }
+    } as unknown as Dockerode);
+    const controller = new AbortController();
+
+    const consume = (async () => {
+      for await (const _event of runtime.streamContainerLogs('container-logs', {
+        follow: true,
+        signal: controller.signal
+      })) {
+        // no-op
+      }
+    })();
+
+    controller.abort();
+    await consume;
+
+    expect(destroySpy).toHaveBeenCalled();
   });
 });

@@ -29,6 +29,14 @@ export interface ContainerDetails {
   id: string;
   labels: Record<string, string>;
   status: ContainerRuntimeStatus;
+  networkMode: string | null;
+  attachedNetworks: string[];
+  publishedPorts: PublishedContainerPort[];
+  exposedPorts: string[];
+  mounts: ContainerMount[];
+  devices: ContainerDevice[];
+  capAdd: string[];
+  privileged: boolean;
 }
 
 export interface ContainerDevice {
@@ -38,23 +46,26 @@ export interface ContainerDevice {
 }
 
 export interface ContainerMount {
-  Type: 'volume';
-  Source: string;
-  Target: string;
-  ReadOnly?: boolean;
+  type: string;
+  source: string | null;
+  target: string | null;
+  readOnly: boolean;
 }
 
-export interface CreateContainerOptions {
+export interface PublishedContainerPort {
+  containerPort: string;
+  hostPort: string;
+  hostIp: string | null;
+}
+
+export interface CreateBoxContainerOptions {
   name: string;
   image: string;
+  networkName: string;
+  volumeName: string;
   labels: Record<string, string>;
   env?: Record<string, string>;
   command?: string[];
-  mounts?: ContainerMount[];
-  networkMode?: string;
-  devices?: ContainerDevice[];
-  capAdd?: string[];
-  capDrop?: string[];
 }
 
 export interface RuntimeLogLine {
@@ -84,7 +95,7 @@ export interface ContainerRuntimeEvent {
 export interface DockerRuntime {
   createNetwork(name: string, labels: Record<string, string>): Promise<void>;
   createVolume(name: string, labels: Record<string, string>): Promise<void>;
-  createContainer(options: CreateContainerOptions): Promise<string>;
+  createBoxContainer(options: CreateBoxContainerOptions): Promise<string>;
   startContainer(containerId: string): Promise<void>;
   stopContainer(containerId: string): Promise<void>;
   removeContainer(containerId: string): Promise<void>;

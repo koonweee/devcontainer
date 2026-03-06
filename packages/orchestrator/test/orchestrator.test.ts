@@ -98,36 +98,74 @@ describe('DevboxOrchestrator', () => {
     expect(runtime.containers.size).toBe(1);
 
     const container = runtime.containers.get(saved!.containerId!);
-    expect(container?.options.image).toBe('runtime:test');
-    expect(container?.options.networkMode).toBe(saved!.networkName);
-    expect(container?.options.mounts).toEqual([
+    if (!container) {
+      throw new Error('Expected container');
+    }
+
+    expect(container.options.image).toBe('runtime:test');
+    expect(container.options.networkName).toBe(saved!.networkName);
+    expect(container.options.volumeName).toBe(saved!.volumeName);
+    expect(container.options.command).toEqual(['sleep', 'infinity']);
+    expect(container.options.env).toMatchObject({
+      EXTRA: 'value',
+      TZ: 'UTC',
+      DEVBOX_TAILSCALE_AUTHKEY: 'tskey-auth-mock',
+      DEVBOX_TAILSCALE_HOSTNAME: expect.stringContaining('devbox-box-alpha-')
+    });
+    expect(container.details.mounts).toEqual([
       {
-        Type: 'volume',
-        Source: saved!.volumeName,
-        Target: '/workspace'
+        type: 'volume',
+        source: saved!.volumeName,
+        target: '/workspace',
+        readOnly: false
       }
     ]);
-    expect(container?.options.devices).toEqual([
+    expect(container.details.devices).toEqual([
       {
         PathOnHost: '/dev/net/tun',
         PathInContainer: '/dev/net/tun',
         CgroupPermissions: 'rwm'
       }
     ]);
-    expect(container?.options.capAdd).toEqual(['NET_ADMIN', 'NET_RAW']);
-    expect(container?.options.env).toMatchObject({
-      EXTRA: 'value',
-      TZ: 'UTC',
-      DEVBOX_TAILSCALE_AUTHKEY: 'tskey-auth-mock',
-      DEVBOX_TAILSCALE_HOSTNAME: expect.stringContaining('devbox-box-alpha-')
-    });
-    expect(container?.labels).toEqual(
+    expect(container.details.capAdd).toEqual(['NET_ADMIN', 'NET_RAW']);
+    expect(container.options.labels).toEqual(
       managedLabels({
         boxId: created.box.id,
         kind: 'container'
       })
     );
     expect(saved?.tailnetUrl).toContain('ssh://');
+  });
+
+  it('uses configured runtime image when creating boxes', async () => {
+    const { runtime, orchestrator } = buildHarness('runtime:test');
+    const { box, job } = await orchestrator.createBox({ name: 'runtime-image-box' });
+    expect(await waitForJob(orchestrator, job.id)).toBe('succeeded');
+    expect(box.image).toBe('runtime:test');
+    expect(runtime.lastCreateBoxContainerOptions?.env).toEqual({
+      DEVBOX_TAILSCALE_AUTHKEY: 'tskey-auth-mock',
+      DEVBOX_TAILSCALE_HOSTNAME: expect.stringContaining('devbox-runtime-image-box-')
+    });
+  });
+
+  it('lets runtime env override request env keys', async () => {
+    const { runtime, orchestrator } = buildHarness('runtime:test', {
+      TZ: 'UTC',
+      EXTRA: 'runtime'
+    });
+    const created = await orchestrator.createBox({
+      name: 'runtime-env-box',
+      env: {
+        EXTRA: 'request'
+      }
+    });
+    expect(await waitForJob(orchestrator, created.job.id)).toBe('succeeded');
+    expect(runtime.lastCreateBoxContainerOptions?.env).toEqual({
+      EXTRA: 'runtime',
+      TZ: 'UTC',
+      DEVBOX_TAILSCALE_AUTHKEY: 'tskey-auth-mock',
+      DEVBOX_TAILSCALE_HOSTNAME: expect.stringContaining('devbox-runtime-env-box-')
+    });
   });
 
   it('requires tailnet setup before creating boxes', async () => {
@@ -240,11 +278,7 @@ describe('DevboxOrchestrator', () => {
       throw new Error('Expected container id');
     }
 
-    const container = runtime.containers.get(saved.containerId);
-    if (!container) {
-      throw new Error('Expected container in mock runtime');
-    }
-    container.labels = {};
+    runtime.updateContainerDetails(saved.containerId, { labels: {} });
 
     await expect(orchestrator.streamBoxLogs(created.box.id, {})).rejects.toMatchObject({
       name: 'SecurityError'
@@ -306,7 +340,7 @@ describe('DevboxOrchestrator', () => {
   });
 
   it('rejects invalid inputs and unmanaged stop operations', async () => {
-    const { runtime, orchestrator } = buildHarness();
+    const { runtime, orchestrator, boxes } = buildHarness();
 
     await expect(
       orchestrator.createBox({
@@ -317,23 +351,13 @@ describe('DevboxOrchestrator', () => {
     const created = await orchestrator.createBox({ name: 'box-charlie' });
     await waitForJob(orchestrator, created.job.id);
 
-    const box = await orchestrator.getBox(created.box.id);
-    if (!box) {
-      throw new Error('Expected public box');
+    const saved = boxes.get(created.box.id);
+    if (!saved?.containerId) {
+      throw new Error('Expected container id');
     }
-    const internal = runtime.lastCreateContainerOptions;
-    expect(internal?.name).toContain(created.box.id);
+    expect(runtime.lastCreateBoxContainerOptions?.name).toContain(created.box.id);
 
-    const savedContainerId = runtime.containers.keys().next().value as string | undefined;
-    if (!savedContainerId) {
-      throw new Error('Expected container');
-    }
-
-    const container = runtime.containers.get(savedContainerId);
-    if (!container) {
-      throw new Error('Expected container in mock runtime');
-    }
-    container.labels = {};
+    runtime.updateContainerDetails(saved.containerId, { labels: {} });
 
     const stopJob = await orchestrator.stopBox(created.box.id);
     expect(await waitForJob(orchestrator, stopJob.id)).toBe('failed');
@@ -363,26 +387,6 @@ describe('DevboxOrchestrator', () => {
     expect(restarted?.tailnetDeviceId).toBeTruthy();
   });
 
-  it('keeps runtime env precedence over request env when injecting container env', async () => {
-    const { runtime, orchestrator } = buildHarness('runtime:test', {
-      TZ: 'UTC',
-      EXTRA: 'runtime'
-    });
-
-    const created = await orchestrator.createBox({
-      name: 'runtime-env-box',
-      env: {
-        EXTRA: 'request'
-      }
-    });
-
-    expect(await waitForJob(orchestrator, created.job.id)).toBe('succeeded');
-    expect(runtime.lastCreateContainerOptions?.env).toMatchObject({
-      TZ: 'UTC',
-      EXTRA: 'runtime'
-    });
-  });
-
   it('marks a box error if runtime inspect returns unmanaged labels during reconcile', async () => {
     const { orchestrator, runtime, boxes } = buildHarness();
     const created = await orchestrator.createBox({ name: 'box-reconcile-error' });
@@ -393,14 +397,106 @@ describe('DevboxOrchestrator', () => {
       throw new Error('Expected container id');
     }
 
-    const container = runtime.containers.get(saved.containerId);
-    if (!container) {
-      throw new Error('Expected container');
-    }
-    container.labels = {};
+    runtime.updateContainerDetails(saved.containerId, { labels: {} });
 
     const reconciled = await orchestrator.getBox(created.box.id);
     expect(reconciled?.status).toBe('error');
+  });
+
+  it.each([
+    ['host networking', { networkMode: 'host' }],
+    [
+      'published Docker host ports',
+      {
+        publishedPorts: [{ containerPort: '8080/tcp', hostPort: '3001', hostIp: '0.0.0.0' }]
+      }
+    ],
+    ['declared exposed ports', { exposedPorts: ['8080/tcp'] }],
+    ['unexpected attached networks', { attachedNetworks: ['devbox-net-box', 'shared-net'] }],
+    [
+      'host bind mounts',
+      {
+        mounts: [
+          {
+            type: 'volume',
+            source: 'devbox-vol-safe',
+            target: '/workspace',
+            readOnly: false
+          },
+          {
+            type: 'bind',
+            source: '/tmp/host-share',
+            target: '/host-share',
+            readOnly: false
+          }
+        ]
+      }
+    ],
+    [
+      'docker socket mounts',
+      {
+        mounts: [
+          {
+            type: 'volume',
+            source: 'devbox-vol-safe',
+            target: '/workspace',
+            readOnly: false
+          },
+          {
+            type: 'bind',
+            source: '/var/run/docker.sock',
+            target: '/var/run/docker.sock',
+            readOnly: false
+          }
+        ]
+      }
+    ],
+    [
+      'unexpected devices',
+      {
+        devices: [
+          { PathOnHost: '/dev/net/tun', PathInContainer: '/dev/net/tun', CgroupPermissions: 'rwm' },
+          { PathOnHost: '/dev/kvm', PathInContainer: '/dev/kvm', CgroupPermissions: 'rwm' }
+        ]
+      }
+    ],
+    ['unexpected capabilities', { capAdd: ['NET_ADMIN', 'NET_RAW', 'SYS_ADMIN'] }]
+  ])('marks boxes as error when inspect reports %s', async (name, patch) => {
+    const { runtime, orchestrator, boxes } = buildHarness();
+    const slug = String(name).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 20).replace(/-$/g, '');
+    const created = await orchestrator.createBox({
+      name: `drift-${slug}`
+    });
+    await waitForJob(orchestrator, created.job.id);
+
+    const saved = boxes.get(created.box.id);
+    if (!saved?.containerId) {
+      throw new Error('Expected container id');
+    }
+
+    runtime.updateContainerDetails(saved.containerId, patch);
+
+    const reconciled = await orchestrator.getBox(created.box.id);
+    expect(reconciled?.status).toBe('error');
+  });
+
+  it('refuses managed operations when a container violates isolation invariants', async () => {
+    const { runtime, orchestrator, boxes } = buildHarness();
+    const created = await orchestrator.createBox({ name: 'box-isolation-stop' });
+    await waitForJob(orchestrator, created.job.id);
+
+    const saved = boxes.get(created.box.id);
+    if (!saved?.containerId) {
+      throw new Error('Expected container id');
+    }
+
+    runtime.updateContainerDetails(saved.containerId, {
+      publishedPorts: [{ containerPort: '8080/tcp', hostPort: '3001', hostIp: '0.0.0.0' }]
+    });
+
+    const stopJob = await orchestrator.stopBox(created.box.id);
+    expect(await waitForJob(orchestrator, stopJob.id)).toBe('failed');
+    expect((await orchestrator.getBox(created.box.id))?.status).toBe('error');
   });
 
   it('emits a warning-only path when tailnet delete fails during removal', async () => {

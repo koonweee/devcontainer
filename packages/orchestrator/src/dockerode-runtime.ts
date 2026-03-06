@@ -3,11 +3,15 @@ import { createInterface } from 'node:readline';
 
 import Dockerode from 'dockerode';
 
+import { buildBoxContainerCreateRequest } from './box-runtime.js';
 import type {
   ContainerRuntimeEvent,
   ContainerDetails,
-  CreateContainerOptions,
+  ContainerDevice,
+  ContainerMount,
+  CreateBoxContainerOptions,
   DockerRuntime,
+  PublishedContainerPort,
   RuntimeLogLine,
   RuntimeEventOptions,
   RuntimeLogOptions
@@ -152,6 +156,59 @@ interface DockerContainerEventPayload {
   };
 }
 
+interface DockerInspectPortBinding {
+  HostIp?: string;
+  HostPort?: string;
+}
+
+interface DockerInspectMount {
+  Type?: string;
+  Source?: string;
+  Destination?: string;
+  RW?: boolean;
+}
+
+interface DockerInspectDevice {
+  PathOnHost?: string;
+  PathInContainer?: string;
+  CgroupPermissions?: string;
+}
+
+function mapInspectMount(mount: DockerInspectMount): ContainerMount {
+  return {
+    type: mount.Type ?? 'unknown',
+    source: mount.Source ?? null,
+    target: mount.Destination ?? null,
+    readOnly: mount.RW === undefined ? false : !mount.RW
+  };
+}
+
+function mapInspectDevice(device: DockerInspectDevice): ContainerDevice {
+  return {
+    PathOnHost: device.PathOnHost ?? '',
+    PathInContainer: device.PathInContainer ?? '',
+    CgroupPermissions: device.CgroupPermissions ?? ''
+  };
+}
+
+function mapPublishedPorts(ports: Record<string, DockerInspectPortBinding[] | null> | undefined): PublishedContainerPort[] {
+  if (!ports) {
+    return [];
+  }
+
+  const published: PublishedContainerPort[] = [];
+  for (const [containerPort, bindings] of Object.entries(ports)) {
+    for (const binding of bindings ?? []) {
+      published.push({
+        containerPort,
+        hostPort: binding.HostPort ?? '',
+        hostIp: binding.HostIp ?? null
+      });
+    }
+  }
+  return published;
+}
+
 /** Executes Docker operations through Docker Engine API via dockerode. */
 export class DockerodeRuntime implements DockerRuntime {
   private readonly docker: Dockerode;
@@ -174,33 +231,9 @@ export class DockerodeRuntime implements DockerRuntime {
     });
   }
 
-  async createContainer(options: CreateContainerOptions): Promise<string> {
+  async createBoxContainer(options: CreateBoxContainerOptions): Promise<string> {
     await this.ensureImageInstalled(options.image);
-
-    const hostConfig: Record<string, unknown> = {
-      Mounts: options.mounts ?? []
-    };
-    if (options.networkMode) {
-      hostConfig.NetworkMode = options.networkMode;
-    }
-    if (options.devices?.length) {
-      hostConfig.Devices = options.devices;
-    }
-    if (options.capAdd?.length) {
-      hostConfig.CapAdd = options.capAdd;
-    }
-    if (options.capDrop?.length) {
-      hostConfig.CapDrop = options.capDrop;
-    }
-
-    const container = await this.docker.createContainer({
-      name: options.name,
-      Image: options.image,
-      Cmd: options.command,
-      Env: Object.entries(options.env ?? {}).map(([key, value]) => `${key}=${value}`),
-      Labels: options.labels,
-      HostConfig: hostConfig
-    });
+    const container = await this.docker.createContainer(buildBoxContainerCreateRequest(options));
     return container.id;
   }
 
@@ -263,7 +296,15 @@ export class DockerodeRuntime implements DockerRuntime {
       return {
         id: details.Id,
         labels: details.Config?.Labels ?? {},
-        status: details.State?.Status ?? 'unknown'
+        status: details.State?.Status ?? 'unknown',
+        networkMode: details.HostConfig?.NetworkMode ?? null,
+        attachedNetworks: Object.keys(details.NetworkSettings?.Networks ?? {}),
+        publishedPorts: mapPublishedPorts(details.NetworkSettings?.Ports),
+        exposedPorts: Object.keys(details.Config?.ExposedPorts ?? {}),
+        mounts: (details.Mounts ?? []).map(mapInspectMount),
+        devices: (details.HostConfig?.Devices ?? []).map(mapInspectDevice),
+        capAdd: details.HostConfig?.CapAdd ?? [],
+        privileged: details.HostConfig?.Privileged ?? false
       };
     } catch (error) {
       const statusCode = (error as { statusCode?: number }).statusCode;

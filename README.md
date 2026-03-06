@@ -16,6 +16,7 @@ Monorepo for a Docker-image-based dev box platform with strict privilege boundar
 ## Canonical docs
 
 - Setup and user workflows: [USAGE.md](USAGE.md)
+- Networking/security guarantees and non-guarantees: [USAGE.md](USAGE.md) and [ARCHITECTURE.md](ARCHITECTURE.md)
 - Architecture boundaries and component responsibilities: [ARCHITECTURE.md](ARCHITECTURE.md)
 - Environment variables (required/optional/defaults): [ENV.md](ENV.md)
 - Contributor guardrails and documentation rules: [AGENTS.md](AGENTS.md)

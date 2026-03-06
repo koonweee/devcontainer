@@ -33,6 +33,11 @@ flowchart LR
 - Web and CLI are unprivileged API consumers and never access Docker or DB directly.
 - API and web are deployed as separate containers or services.
 
+## Box isolation invariants
+- The orchestrator uses a box-specific runtime contract; box creation cannot express Docker host port publishing, exposed ports, host networking, shared network attachments, host bind mounts, docker.sock mounts, or orchestrator-managed ingress/sidecar helpers.
+- Runtime reconciliation validates those same Docker-layer invariants on inspect/read paths. If a managed box drifts into a forbidden state, the orchestrator marks it `error` and refuses further managed operations on that container.
+- These guarantees stop at the orchestrator/Docker boundary. A privileged developer inside a box may intentionally run a proxy, tunnel, or other box-local network process, but that must not grant control over the host, the orchestrator, or other boxes.
+
 ## Tailscale integration
 - Tailnet config (OAuth credentials, tags, hostname prefix) is stored in single-row `tailnet_config` SQLite state.
 - Config is locked (409) while boxes exist to prevent credential drift.
@@ -41,19 +46,15 @@ flowchart LR
 - Cleanup is one shared idempotent path for create-failure compensation, remove flows, and external container deletion cleanup jobs.
 
 ## Runtime network model
-- Each box gets a dedicated Docker network (`devbox-net-<boxId>`) to keep boxes isolated from each other at the Docker layer.
-- A box container only joins its own Docker network, so boxes cannot directly reach each other over Docker bridge networking.
+- Each created box is assigned a dedicated Docker network (`devbox-net-<boxId>`) by the orchestrator and attached to that network as its container `NetworkMode`.
+- Boxes are therefore isolated from each other by default at the Docker-network level (no shared box network, no host networking, no host port publishing).
+- Inbound traffic intentionally provided by the platform is restricted to the box's Tailscale identity, with Tailnet-only inbound enforced by the runtime entrypoint iptables rules.
+- Box containers do not receive docker.sock or other host bind mounts from the platform runtime contract.
 - Each box is also a real Tailscale node, so boxes can reach each other over Tailscale if ACL and tag policy allow it.
 - Running `tailscaled` in the workspace keeps Tailnet SSH simple for developers and makes it easy to expose box-local services such as development web apps on the box's Tailnet address.
-- Orchestrator does not publish Docker host ports for boxes and does not use host networking.
 - The Docker host may still be able to reach container IPs on per-box bridge networks; preventing host-local reachability is out of scope for this implementation.
 - Services started inside a box may be reachable over that box’s Tailnet address if Tailscale ACLs permit it.
 - This implementation does not guarantee protection against a full-sudo workspace user changing box-local networking state.
-- Examples of box-local boundaries a full-sudo user can still break:
-  - start extra listeners that become reachable on the box's Tailnet IP or hostname
-  - add ad hoc port forwards or reverse proxies inside the box
-  - change routes, iptables rules, or other box-local network configuration
-  - reconfigure or interfere with the box's own Tailscale connectivity from inside that workspace
 
 ## Key references
 - Compose deployment wiring: [`docker-compose.yml`]
