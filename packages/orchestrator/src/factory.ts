@@ -57,12 +57,7 @@ function parseRuntimeEnvFile(runtimeEnvFile: string): Record<string, string> {
 }
 
 function resolveRuntimeEnv(runtimeEnvFile: string): Record<string, string> {
-  const runtimeEnv = parseRuntimeEnvFile(runtimeEnvFile);
-  if (!('DEV_PASSWORD' in runtimeEnv)) {
-    runtimeEnv.DEV_PASSWORD = 'password';
-  }
-
-  return runtimeEnv;
+  return parseRuntimeEnvFile(runtimeEnvFile);
 }
 
 export function createOrchestrator(options?: OrchestratorFactoryOptions): DevboxOrchestrator {

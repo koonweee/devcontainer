@@ -364,7 +364,10 @@ export class DockerodeRuntime implements DockerRuntime {
       return;
     }
 
-    const stream = raw;
+    const stream = raw as Readable & {
+      destroy?: (error?: Error) => void;
+      destroyed?: boolean;
+    };
     const stdout = new PassThrough();
     const stderr = new PassThrough();
     this.docker.modem.demuxStream(stream, stdout, stderr);
@@ -373,12 +376,28 @@ export class DockerodeRuntime implements DockerRuntime {
     const waiters: Array<() => void> = [];
     let ended = false;
     let streamError: Error | null = null;
+    let aborted = false;
 
     const wake = (): void => {
       const waiter = waiters.shift();
       if (waiter) {
         waiter();
       }
+    };
+
+    const cleanupAbort = (): void => {
+      options.signal?.removeEventListener('abort', onAbort);
+    };
+
+    const onAbort = (): void => {
+      aborted = true;
+      ended = true;
+      stdoutReader.close();
+      stderrReader.close();
+      if (typeof stream.destroy === 'function') {
+        stream.destroy();
+      }
+      wake();
     };
 
     const onLine = (which: 'stdout' | 'stderr', line: string): void => {
@@ -396,6 +415,11 @@ export class DockerodeRuntime implements DockerRuntime {
 
     const stdoutReader = createInterface({ input: stdout as Readable });
     const stderrReader = createInterface({ input: stderr as Readable });
+    if (options.signal?.aborted) {
+      onAbort();
+    } else {
+      options.signal?.addEventListener('abort', onAbort, { once: true });
+    }
 
     stdoutReader.on('line', (line) => onLine('stdout', line));
     stderrReader.on('line', (line) => onLine('stderr', line));
@@ -414,25 +438,34 @@ export class DockerodeRuntime implements DockerRuntime {
       wake();
     });
 
-    while (!ended || queue.length > 0) {
-      if (queue.length > 0) {
-        const event = queue.shift();
-        if (event) {
-          yield event;
+    try {
+      while (!ended || queue.length > 0) {
+        if (aborted) {
+          break;
         }
-        continue;
+        if (queue.length > 0) {
+          const event = queue.shift();
+          if (event) {
+            yield event;
+          }
+          continue;
+        }
+
+        await new Promise<void>((resolve) => {
+          waiters.push(resolve);
+        });
       }
 
-      await new Promise<void>((resolve) => {
-        waiters.push(resolve);
-      });
-    }
-
-    stdoutReader.close();
-    stderrReader.close();
-
-    if (streamError) {
-      throw streamError;
+      if (streamError && !aborted) {
+        throw streamError;
+      }
+    } finally {
+      cleanupAbort();
+      stdoutReader.close();
+      stderrReader.close();
+      if (!stream.destroyed && typeof stream.destroy === 'function') {
+        stream.destroy();
+      }
     }
   }
 

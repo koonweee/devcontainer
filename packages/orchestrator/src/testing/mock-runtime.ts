@@ -25,6 +25,9 @@ export class MockDockerRuntime implements DockerRuntime {
   lastCreateContainerOptions: CreateContainerOptions | null = null;
   lastStreamContainerLogsOptions: RuntimeLogOptions | null = null;
   lastStreamContainerLogsContainerId: string | null = null;
+  lastStreamContainerLogsSignal: AbortSignal | null = null;
+  holdFollowLogStreamOpen = false;
+  logStreamAbortCount = 0;
   failOn: Partial<Record<keyof DockerRuntime, Error>> = {};
   private readonly containerEvents: ContainerRuntimeEvent[] = [];
   private readonly eventWaiters: Array<() => void> = [];
@@ -116,9 +119,25 @@ export class MockDockerRuntime implements DockerRuntime {
     this.throwIfConfigured('streamContainerLogs');
     this.lastStreamContainerLogsContainerId = containerId;
     this.lastStreamContainerLogsOptions = options;
+    this.lastStreamContainerLogsSignal = options.signal ?? null;
     const container = this.containers.get(containerId);
     for (const log of container?.logs ?? []) {
       yield log;
+    }
+    if (options.follow && this.holdFollowLogStreamOpen) {
+      await new Promise<void>((resolve) => {
+        const onAbort = () => {
+          this.logStreamAbortCount += 1;
+          options.signal?.removeEventListener('abort', onAbort);
+          resolve();
+        };
+        if (options.signal?.aborted) {
+          this.logStreamAbortCount += 1;
+          resolve();
+          return;
+        }
+        options.signal?.addEventListener('abort', onAbort, { once: true });
+      });
     }
   }
 

@@ -43,7 +43,7 @@ async function waitForCondition(
 
 function buildHarness(
   runtimeImage?: string,
-  runtimeEnv: Record<string, string> = { DEV_PASSWORD: 'password' }
+  runtimeEnv: Record<string, string> = {}
 ): {
   runtime: MockDockerRuntime;
   orchestrator: DevboxOrchestrator;
@@ -82,7 +82,7 @@ function buildTailnetHarness(): {
   const tailscaleClient = new MockTailscaleClient();
   const orchestrator = new DevboxOrchestrator(
     runtime, boxes, jobs, runner, events,
-    undefined, { DEV_PASSWORD: 'password' },
+    undefined, {},
     tailnetConfig, tailscaleClient
   );
   return { runtime, orchestrator, boxes, tailnetConfig, tailscaleClient };
@@ -117,24 +117,21 @@ describe('DevboxOrchestrator', () => {
     const { box, job } = await orchestrator.createBox({ name: 'runtime-image-box' });
     expect(await waitForJob(orchestrator, job.id)).toBe('succeeded');
     expect(box.image).toBe('runtime:test');
-    expect(runtime.lastCreateContainerOptions?.env?.DEV_PASSWORD).toBe('password');
+    expect(runtime.lastCreateContainerOptions?.env).toEqual({});
   });
 
   it('lets runtime env override request env keys', async () => {
     const { runtime, orchestrator } = buildHarness('runtime:test', {
-      DEV_PASSWORD: 'configured-password',
       TZ: 'UTC'
     });
     const created = await orchestrator.createBox({
       name: 'runtime-env-box',
       env: {
-        DEV_PASSWORD: 'request-password',
         EXTRA: 'value'
       }
     });
     expect(await waitForJob(orchestrator, created.job.id)).toBe('succeeded');
     expect(runtime.lastCreateContainerOptions?.env).toEqual({
-      DEV_PASSWORD: 'configured-password',
       TZ: 'UTC',
       EXTRA: 'value'
     });
@@ -218,7 +215,7 @@ describe('DevboxOrchestrator', () => {
     expect(removeIndex).toBeGreaterThan(stopIndex);
   });
 
-  it('fails remove and keeps box when stop during remove fails', async () => {
+  it('fails remove then finishes deletion through the shared cleanup job when stop during remove fails', async () => {
     const { runtime, orchestrator } = buildHarness();
 
     const created = await orchestrator.createBox({
@@ -229,7 +226,8 @@ describe('DevboxOrchestrator', () => {
     runtime.failOn.stopContainer = new Error('stop failed during remove');
     const removeJob = await orchestrator.removeBox(created.box.id);
     expect(await waitForJob(orchestrator, removeJob.id)).toBe('failed');
-    expect((await orchestrator.getBox(created.box.id))?.status).toBe('error');
+    delete runtime.failOn.stopContainer;
+    await waitForCondition(async () => (await orchestrator.getBox(created.box.id)) === null);
   });
 
   it('rejects invalid inputs and unmanaged resources', async () => {
@@ -299,7 +297,40 @@ describe('DevboxOrchestrator', () => {
     });
   });
 
-  it('marks box status as error when create/stop jobs fail and hard deletes after missing-container remove failures', async () => {
+  it('forwards abort signals when streaming managed box logs', async () => {
+    const { runtime, orchestrator } = buildHarness();
+    runtime.holdFollowLogStreamOpen = true;
+
+    const created = await orchestrator.createBox({
+      name: 'box-logs-abort'
+    });
+    await waitForJob(orchestrator, created.job.id);
+
+    const box = await orchestrator.getBox(created.box.id);
+    if (!box?.containerId) {
+      throw new Error('Expected container id');
+    }
+
+    const controller = new AbortController();
+    const stream = await orchestrator.streamBoxLogs(box.id, {
+      follow: true,
+      signal: controller.signal
+    });
+
+    const consume = (async () => {
+      for await (const _event of stream) {
+        // no-op
+      }
+    })();
+
+    await waitForCondition(() => runtime.lastStreamContainerLogsSignal === controller.signal);
+    controller.abort();
+    await consume;
+
+    expect(runtime.logStreamAbortCount).toBe(1);
+  });
+
+  it('compensates failed create jobs, marks stop failures as error, and removes boxes after successful cleanup', async () => {
     const { runtime, orchestrator } = buildHarness();
 
     runtime.failOn.createNetwork = new Error('network create failed');
@@ -307,7 +338,7 @@ describe('DevboxOrchestrator', () => {
       name: 'box-delta'
     });
     expect(await waitForJob(orchestrator, failedCreate.job.id)).toBe('failed');
-    expect((await orchestrator.getBox(failedCreate.box.id))?.status).toBe('error');
+    expect(await orchestrator.getBox(failedCreate.box.id)).toBeNull();
 
     delete runtime.failOn.createNetwork;
     const created = await orchestrator.createBox({
@@ -324,7 +355,8 @@ describe('DevboxOrchestrator', () => {
     runtime.failOn.removeVolume = new Error('remove volume failed');
     const removeJob = await orchestrator.removeBox(created.box.id);
     expect(await waitForJob(orchestrator, removeJob.id)).toBe('failed');
-    expect(await orchestrator.getBox(created.box.id)).toBeNull();
+    delete runtime.failOn.removeVolume;
+    await waitForCondition(async () => (await orchestrator.getBox(created.box.id)) === null);
   });
 
   it('reconciles running boxes to stopped when runtime reports exited', async () => {
@@ -773,6 +805,33 @@ describe('DevboxOrchestrator - Tailscale integration', () => {
     } finally {
       warnSpy.mockRestore();
     }
+  });
+
+  it('falls back to tailnet hostname lookup during cleanup when device id is missing', async () => {
+    const { orchestrator, tailnetConfig, tailscaleClient, boxes } = buildTailnetHarness();
+    tailnetConfig.set(SAMPLE_TAILNET_INPUT);
+
+    const { box, job } = await orchestrator.createBox({ name: 'cleanup-hostname-fallback' });
+    await waitForJob(orchestrator, job.id);
+    const saved = await orchestrator.getBox(box.id);
+    if (!saved?.tailnetUrl || !saved.tailnetDeviceId) {
+      throw new Error('Expected tailnet identity');
+    }
+
+    tailscaleClient.devices = [
+      {
+        id: saved.tailnetDeviceId,
+        hostname: saved.tailnetUrl.replace('ssh://', ''),
+        name: saved.tailnetUrl.replace('ssh://', '')
+      }
+    ];
+    boxes.update(box.id, { tailnetDeviceId: null });
+
+    const removeJob = await orchestrator.removeBox(box.id);
+    expect(await waitForJob(orchestrator, removeJob.id)).toBe('succeeded');
+
+    const deleteCall = [...tailscaleClient.calls].reverse().find((call) => call.method === 'deleteDevice');
+    expect(deleteCall?.args[1]).toBe(saved.tailnetDeviceId);
   });
 
   it('missing container enqueues cleanup job when tailnet is configured', async () => {

@@ -50,8 +50,34 @@ describe('API routes', () => {
     expect(preflight4173.statusCode).toBe(204);
     expect(preflight4173.headers['access-control-allow-origin']).toBe('http://localhost:4173');
 
-    const getBoxes = await app.inject({ method: 'GET', url: '/v1/boxes' });
+    const getBoxes = await app.inject({
+      method: 'GET',
+      url: '/v1/boxes',
+      headers: {
+        origin: 'http://localhost:4173'
+      }
+    });
     expect(getBoxes.headers['access-control-allow-origin']).toBe('http://localhost:4173');
+    await app.close();
+  });
+
+  it('rejects disallowed origins instead of sending a fallback CORS origin', async () => {
+    const app = await buildApp({
+      orchestrator: buildInMemoryOrchestrator(),
+      corsOrigin: 'http://localhost:4173,http://localhost:5173'
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/boxes',
+      headers: {
+        origin: 'http://malicious.example'
+      }
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.headers['access-control-allow-origin']).toBeUndefined();
+    expect((response.json() as { message: string }).message).toContain('Origin not allowed');
     await app.close();
   });
 
@@ -481,6 +507,48 @@ describe('API routes', () => {
     await app.close();
   });
 
+  it('aborts log follow streams when the client disconnects', async () => {
+    const harness = buildInMemoryHarness();
+    harness.runtime.holdFollowLogStreamOpen = true;
+    const app = await buildApp({ orchestrator: harness.orchestrator });
+    const address = await app.listen({ host: '127.0.0.1', port: 0 });
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/v1/boxes',
+      payload: {
+        name: 'abort-log-stream-box'
+      }
+    });
+    const created = createRes.json() as { box: { id: string }; job: { id: string } };
+    await waitForTerminalJob(app, created.job.id);
+    const box = await harness.orchestrator.getBox(created.box.id);
+    if (!box?.containerId) {
+      throw new Error('Expected container id for abort test');
+    }
+    harness.runtime.pushLog(box.containerId, {
+      stream: 'stdout',
+      timestamp: new Date().toISOString(),
+      line: 'ready'
+    });
+
+    const controller = new AbortController();
+    const response = await fetch(`${address}/v1/boxes/${created.box.id}/logs?follow=true`, {
+      signal: controller.signal
+    });
+    expect(response.status).toBe(200);
+    await response.body?.cancel();
+    controller.abort();
+
+    const deadline = Date.now() + 3_000;
+    while (Date.now() < deadline && harness.runtime.logStreamAbortCount === 0) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+
+    expect(harness.runtime.logStreamAbortCount).toBe(1);
+    await app.close();
+  });
+
   it('returns 400 when tail query is out of range', async () => {
     const app = await buildApp({ orchestrator: buildInMemoryOrchestrator() });
 
@@ -494,7 +562,7 @@ describe('API routes', () => {
     await app.close();
   });
 
-  it('returns 400 when requesting logs before a container exists', async () => {
+  it('returns 404 when requesting logs for a box that failed creation and was compensated', async () => {
     const harness = buildInMemoryHarness();
     harness.runtime.failOn.createContainer = new Error('create container failed');
     const app = await buildApp({ orchestrator: harness.orchestrator });
@@ -514,8 +582,8 @@ describe('API routes', () => {
       url: `/v1/boxes/${created.box.id}/logs`
     });
 
-    expect(response.statusCode).toBe(400);
-    expect((response.json() as { message: string }).message).toContain('no container logs yet');
+    expect(response.statusCode).toBe(404);
+    expect((response.json() as { message: string }).message).toContain('Box not found');
     await app.close();
   });
 

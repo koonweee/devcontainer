@@ -3,17 +3,10 @@ set -eu
 
 DEV_USER="${DEV_USER:-dev}"
 
-if [ -z "${DEV_PASSWORD:-}" ]; then
-  echo "error: DEV_PASSWORD is required" >&2
-  exit 1
-fi
-
 if ! id "${DEV_USER}" >/dev/null 2>&1; then
   echo "error: user '${DEV_USER}' does not exist" >&2
   exit 1
 fi
-
-echo "${DEV_USER}:${DEV_PASSWORD}" | chpasswd
 
 mkdir -p /var/run/sshd
 
@@ -21,6 +14,11 @@ mkdir -p /var/run/sshd
 TAILSCALE_STATE_DIR="/workspace/.tailscale"
 TAILSCALE_STATE_FILE="${TAILSCALE_STATE_DIR}/tailscaled.state"
 mkdir -p "${TAILSCALE_STATE_DIR}" /var/run/tailscale
+
+if [ -z "${DEVBOX_TAILSCALE_AUTHKEY:-}" ] && [ ! -s "${TAILSCALE_STATE_FILE}" ]; then
+  echo "error: Tailscale auth requires DEVBOX_TAILSCALE_AUTHKEY or persisted state at ${TAILSCALE_STATE_FILE}" >&2
+  exit 1
+fi
 
 tailscaled --state="${TAILSCALE_STATE_FILE}" \
   --socket=/var/run/tailscale/tailscaled.sock &

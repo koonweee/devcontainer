@@ -23,6 +23,7 @@
      - `devices:core` write (device lookup + cleanup delete)
    - Ensure your ACL `tagOwners` allows configured tags (default `tag:devcontainer`), for example:
      - `"tagOwners": { "tag:devcontainer": ["autogroup:admin", "tag:devcontainer"] }`
+   - Runtime boxes fail fast if neither an injected auth key nor persisted Tailscale state is available.
 9. Verify changes: `npm run typecheck && npm run test`.
 10. Match CI locally before opening a PR: `npm run lint && npm run test && npm run build && npm run check:client`.
 
@@ -39,7 +40,7 @@
 - Configure once via web setup form or CLI `devbox setup tailnet`.
 - OAuth scopes required: `auth_keys` write and `devices:core` write.
 - ACL must allow configured tags in `tagOwners` (default tag: `tag:devcontainer`).
-- Tailnet SSH access is controlled by Tailscale SSH policy (`ssh` rules), not by devbox itself.
+- Tailnet SSH access is controlled only by Tailscale SSH policy (`ssh` rules), not by local box SSH auth configuration.
   - Docs: https://tailscale.com/kb/1193/tailscale-ssh
 - Config is locked while boxes exist (delete all boxes to reconfigure).
 - Check status: `devbox setup status` or `GET /v1/tailnet/config`.

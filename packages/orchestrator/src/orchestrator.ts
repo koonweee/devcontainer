@@ -64,6 +64,11 @@ const RUNTIME_RECONCILE_ACTIONS = new Set([
 ]);
 const DEVICE_CAPTURE_RETRY_DELAYS = [1_000, 2_000, 3_000, 5_000, 8_000, 13_000] as const;
 
+interface CleanupBoxResourcesResult {
+  ok: boolean;
+  errors: string[];
+}
+
 /** Coordinates box lifecycle operations, jobs, logs, and security checks. */
 export class DevboxOrchestrator {
   private runtimeMonitorAbortController: AbortController | null = null;
@@ -260,7 +265,17 @@ export class DevboxOrchestrator {
         });
         this.publishBox(running);
       } catch (error) {
-        this.markBoxError(box.id);
+        const latestBox = this.boxes.get(box.id) ?? box;
+        const cleanup = await this.cleanupBoxResources(latestBox, { stopContainer: true });
+        if (cleanup.ok) {
+          if (this.boxes.get(box.id)) {
+            this.boxes.delete(box.id);
+            this.publishBoxRemoved(box.id);
+          }
+        } else {
+          this.markBoxError(box.id);
+          await this.runCleanupJob(this.boxes.get(box.id) ?? latestBox, 'Cleanup after failed create');
+        }
         throw error;
       }
     });
@@ -378,28 +393,22 @@ export class DevboxOrchestrator {
 
     this.jobRunner.enqueue(job.id, async (ctx) => {
       try {
-        if (box.containerId) {
-          ctx.setProgress(15, 'Stopping container');
-          await this.assertManagedContainer(box.id, box.containerId);
-          await this.runtime.stopContainer(box.containerId);
-
-          ctx.setProgress(30, 'Removing container');
-          await this.runtime.removeContainer(box.containerId);
+        ctx.setProgress(15, 'Cleaning up box resources');
+        const cleanup = await this.cleanupBoxResources(this.boxes.get(box.id) ?? box, {
+          stopContainer: true
+        });
+        if (!cleanup.ok) {
+          this.markBoxError(box.id);
+          await this.runCleanupJob(this.boxes.get(box.id) ?? box, 'Cleanup after failed removal');
+          throw new Error(cleanup.errors.join('; '));
         }
-
-        ctx.setProgress(45, 'Cleaning up Tailnet device');
-        await this.cleanupTailnetDevice(box);
-
-        ctx.setProgress(65, 'Removing network');
-        await this.runtime.removeNetwork(box.networkName);
-
-        ctx.setProgress(85, 'Removing volume');
-        await this.runtime.removeVolume(box.volumeName);
 
         this.boxes.delete(box.id);
         this.publishBoxRemoved(box.id);
       } catch (error) {
-        this.markBoxError(box.id);
+        if (this.boxes.get(box.id)) {
+          this.markBoxError(box.id);
+        }
         throw error;
       }
     });
@@ -455,16 +464,24 @@ export class DevboxOrchestrator {
       return;
     }
 
-    if (!box.tailnetDeviceId) {
-      console.warn(
-        `[orchestrator] tailnet cleanup skipped for box ${box.id}: missing tailnetDeviceId`
-      );
+    let deviceId = box.tailnetDeviceId;
+    let cleanupPath = deviceId ? `deviceId:${deviceId}` : null;
+    if (!deviceId && box.tailnetUrl?.startsWith('ssh://')) {
+      const hostname = box.tailnetUrl.slice('ssh://'.length);
+      const device = await this.tailscaleClient.findDeviceByHostname(tailnetConfig, hostname);
+      if (device) {
+        deviceId = device.id;
+        cleanupPath = `hostname:${hostname}`;
+      }
+    }
+
+    if (!deviceId) {
+      console.warn(`[orchestrator] tailnet cleanup skipped for box ${box.id}: missing device identity`);
       return;
     }
 
-    const cleanupPath = `deviceId:${box.tailnetDeviceId}`;
     try {
-      await this.tailscaleClient.deleteDevice(tailnetConfig, box.tailnetDeviceId);
+      await this.tailscaleClient.deleteDevice(tailnetConfig, deviceId);
     } catch (error) {
       // Tailnet cleanup failure is a warning, not a fatal error.
       const message = error instanceof Error ? error.message : String(error);
@@ -474,7 +491,7 @@ export class DevboxOrchestrator {
     }
   }
 
-  private async runCleanupJob(box: Box): Promise<void> {
+  private async runCleanupJob(box: Box, message = 'Cleanup after external deletion'): Promise<void> {
     if (this.cleanupInProgress.has(box.id)) {
       return;
     }
@@ -485,24 +502,20 @@ export class DevboxOrchestrator {
       status: 'queued',
       boxId: box.id,
       progress: 0,
-      message: 'Cleanup after external deletion'
+      message
     });
     publishJob(this.events, job);
 
     this.jobRunner.enqueue(job.id, async (ctx) => {
       try {
-        ctx.setProgress(20, 'Cleaning up Tailnet device');
-        await this.cleanupTailnetDevice(box);
-
-        ctx.setProgress(50, 'Removing network');
-        try {
-          await this.runtime.removeNetwork(box.networkName);
-        } catch { /* best effort */ }
-
-        ctx.setProgress(75, 'Removing volume');
-        try {
-          await this.runtime.removeVolume(box.volumeName);
-        } catch { /* best effort */ }
+        ctx.setProgress(20, 'Cleaning up box resources');
+        const cleanup = await this.cleanupBoxResources(this.boxes.get(box.id) ?? box, {
+          stopContainer: true
+        });
+        if (!cleanup.ok) {
+          this.markBoxError(box.id);
+          throw new Error(cleanup.errors.join('; '));
+        }
 
         this.boxes.delete(box.id);
         this.publishBoxRemoved(box.id);
@@ -779,5 +792,82 @@ export class DevboxOrchestrator {
       type: 'box.removed',
       boxId
     });
+  }
+
+  private async cleanupBoxResources(
+    box: Box,
+    options: { stopContainer: boolean }
+  ): Promise<CleanupBoxResourcesResult> {
+    const errors: string[] = [];
+
+    await this.captureCleanupError(errors, async () => {
+      await this.cleanupTailnetDevice(box);
+    }, 'tailnet device cleanup');
+
+    if (box.containerId) {
+      if (options.stopContainer) {
+        await this.captureCleanupError(
+          errors,
+          async () => {
+            await this.assertManagedContainer(box.id, box.containerId!);
+            await this.runtime.stopContainer(box.containerId!);
+          },
+          `stop container ${box.containerId}`
+        );
+      }
+
+      await this.captureCleanupError(
+        errors,
+        async () => {
+          await this.assertManagedContainer(box.id, box.containerId!);
+          await this.runtime.removeContainer(box.containerId!);
+        },
+        `remove container ${box.containerId}`
+      );
+    }
+
+    await this.captureCleanupError(
+      errors,
+      async () => {
+        await this.runtime.removeNetwork(box.networkName);
+      },
+      `remove network ${box.networkName}`
+    );
+    await this.captureCleanupError(
+      errors,
+      async () => {
+        await this.runtime.removeVolume(box.volumeName);
+      },
+      `remove volume ${box.volumeName}`
+    );
+
+    return {
+      ok: errors.length === 0,
+      errors
+    };
+  }
+
+  private async captureCleanupError(
+    errors: string[],
+    work: () => Promise<void>,
+    label: string
+  ): Promise<void> {
+    try {
+      await work();
+    } catch (error) {
+      if (this.isMissingResourceError(error)) {
+        return;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      errors.push(`${label}: ${message}`);
+    }
+  }
+
+  private isMissingResourceError(error: unknown): boolean {
+    if (error instanceof NotFoundError) {
+      return true;
+    }
+    const statusCode = (error as { statusCode?: unknown } | null)?.statusCode;
+    return statusCode === 404;
   }
 }

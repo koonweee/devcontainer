@@ -576,14 +576,21 @@ export function createDevboxStore(initialBoxes: Box[], apiBaseUrl?: string, clie
   ): Promise<void> {
     const isNewTab = !currentState.openLogTabs.includes(boxId);
     ensureViewer(boxId);
+    const existingViewer = currentState.logViewers[boxId] ?? defaultLogViewer(boxId);
+    const nextFollow = options?.follow ?? existingViewer.follow;
+    const nextTail = options?.tail ?? existingViewer.tail;
+    const nextSince = options?.since ?? existingViewer.since;
+    const didOptionsChange =
+      nextFollow !== existingViewer.follow ||
+      nextTail !== existingViewer.tail ||
+      nextSince !== existingViewer.since;
 
     updateState((current) => {
-      const viewer = current.logViewers[boxId] ?? defaultLogViewer(boxId);
       const nextViewer: LogViewerState = {
-        ...viewer,
-        follow: options?.follow ?? viewer.follow,
-        tail: options?.tail ?? viewer.tail,
-        since: options?.since ?? viewer.since,
+        ...existingViewer,
+        follow: nextFollow,
+        tail: nextTail,
+        since: nextSince,
         error: null,
         lastActivityAt: nowIso()
       };
@@ -601,7 +608,7 @@ export function createDevboxStore(initialBoxes: Box[], apiBaseUrl?: string, clie
       };
     });
 
-    if (!isNewTab) {
+    if (!isNewTab && !didOptionsChange) {
       return;
     }
 
@@ -610,7 +617,9 @@ export function createDevboxStore(initialBoxes: Box[], apiBaseUrl?: string, clie
     const viewer = currentState.logViewers[boxId];
     if (viewer?.follow) {
       startFollowLoop(boxId);
+      return;
     }
+    stopLogStream(boxId);
   }
 
   function setActiveLogTab(boxId: string): void {

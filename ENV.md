@@ -30,7 +30,7 @@ Canonical reference for runtime environment variables and defaults.
 - `DEVBOX_RUNTIME_ENV_FILE` (default fallback resolves `docker/runtime/runtime.env` from repo)
   - File path containing env entries to inject into every created box.
   - Recommendation: keep box-runtime env in `docker/runtime/runtime.env` instead of root `.env`.
-  - Example file entries: `DEV_PASSWORD=password`, `TZ=UTC`.
+  - Example file entries: `TZ=UTC`.
 
 - `DEVBOX_INTERNAL_API_URL` (default: `http://localhost:3000`)
   - Used by web SSR/server-side requests to reach the API.
@@ -58,6 +58,7 @@ These are set automatically by the orchestrator when Tailscale is configured. Th
 - API bind/port are fixed by the service (`0.0.0.0:3000`) and are not configured through env vars.
 - Keep runtime container env entries in `docker/runtime/runtime.env`.
 - Tailscale runtime state path is fixed at `/workspace/.tailscale` inside each box (not user-configurable).
+- Runtime boxes only support Tailscale SSH. Password or local SSH-key auth is not part of the supported runtime env contract.
 - Tailnet credentials (OAuth client ID/secret) are stored in the SQLite database, not in env vars. Configure them via the web UI setup form or `devbox setup tailnet` CLI command.
 - Tailscale OAuth client must include `auth_keys` write and `devices:core` write scopes.
 - Tailnet ACL `tagOwners` must allow configured device tags (default `tag:devcontainer`).

@@ -79,6 +79,7 @@ export interface LogOptions {
   follow?: boolean;
   since?: string;
   tail?: number;
+  signal?: AbortSignal;
 }
 
 export interface OrchestratorEventMap {

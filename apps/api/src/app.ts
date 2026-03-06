@@ -97,17 +97,24 @@ export async function buildApp(options?: BuildAppOptions) {
   const configuredCorsOrigins = parseCorsOrigins(
     options?.corsOrigin ?? process.env.DEVBOX_WEB_ORIGIN ?? 'http://localhost:5173,http://localhost:4173'
   );
-  const defaultCorsOrigin = configuredCorsOrigins[0] ?? 'http://localhost:5173';
-  const resolveCorsOrigin = (request: FastifyRequest): string => {
+  const resolveCorsOrigin = (request: FastifyRequest): string | null => {
     const requestOrigin = typeof request.headers.origin === 'string' ? request.headers.origin : null;
     if (requestOrigin && configuredCorsOrigins.includes(requestOrigin)) {
       return requestOrigin;
     }
-    return defaultCorsOrigin;
+    return null;
   };
 
   app.addHook('onRequest', async (request, reply) => {
-    reply.header('Access-Control-Allow-Origin', resolveCorsOrigin(request));
+    const requestOrigin = typeof request.headers.origin === 'string' ? request.headers.origin : null;
+    const corsOrigin = resolveCorsOrigin(request);
+    if (requestOrigin && !corsOrigin) {
+      await reply.status(403).send({ message: `Origin not allowed: ${requestOrigin}` });
+      return;
+    }
+    if (corsOrigin) {
+      reply.header('Access-Control-Allow-Origin', corsOrigin);
+    }
     reply.header('Vary', 'Origin');
     reply.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
     reply.header('Access-Control-Allow-Headers', 'Content-Type,Accept,Authorization');
@@ -226,21 +233,37 @@ export async function buildApp(options?: BuildAppOptions) {
       }
     },
     async (request, reply) => {
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      reply.raw.once('close', abort);
+      reply.raw.once('error', abort);
+
       const logs = await orchestrator.streamBoxLogs(request.params.boxId, {
         follow: request.query.follow,
         since: request.query.since,
-        tail: request.query.tail
+        tail: request.query.tail,
+        signal: controller.signal
       });
 
       reply.hijack();
-      reply.raw.setHeader('Access-Control-Allow-Origin', resolveCorsOrigin(request));
+      const corsOrigin = resolveCorsOrigin(request);
+      if (corsOrigin) {
+        reply.raw.setHeader('Access-Control-Allow-Origin', corsOrigin);
+      }
       reply.raw.setHeader('Vary', 'Origin');
       reply.raw.setHeader('Content-Type', 'text/event-stream');
       reply.raw.setHeader('Cache-Control', 'no-cache');
       reply.raw.setHeader('Connection', 'keep-alive');
 
-      for await (const log of logs) {
-        writeSseEvent(reply, 'box.logs', log);
+      try {
+        for await (const log of logs) {
+          if (controller.signal.aborted) {
+            break;
+          }
+          writeSseEvent(reply, 'box.logs', log);
+        }
+      } finally {
+        controller.abort();
       }
 
       reply.raw.end();
@@ -320,7 +343,10 @@ export async function buildApp(options?: BuildAppOptions) {
 
   app.get('/v1/events', async (request, reply) => {
     reply.hijack();
-    reply.raw.setHeader('Access-Control-Allow-Origin', resolveCorsOrigin(request));
+    const corsOrigin = resolveCorsOrigin(request);
+    if (corsOrigin) {
+      reply.raw.setHeader('Access-Control-Allow-Origin', corsOrigin);
+    }
     reply.raw.setHeader('Vary', 'Origin');
     reply.raw.setHeader('Content-Type', 'text/event-stream');
     reply.raw.setHeader('Cache-Control', 'no-cache');

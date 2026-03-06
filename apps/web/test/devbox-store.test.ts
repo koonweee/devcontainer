@@ -446,6 +446,76 @@ describe('createDevboxStore', () => {
     unsubscribe();
   });
 
+  it('reloads an existing log tab when options change', async () => {
+    const box = makeBox();
+    const streamBoxLogs = vi.fn(async (_boxId: string, options?: { follow?: boolean; tail?: number; since?: string }) => {
+      async function* logs(): AsyncIterable<BoxLogsEvent> {
+        if (options?.follow) {
+          return;
+        }
+        yield {
+          event: 'box.logs',
+          data: {
+            boxId: box.id,
+            stream: 'stdout',
+            line: `snapshot-${options?.tail ?? 200}`,
+            timestamp: new Date('2026-01-01T00:00:00.000Z').toISOString()
+          }
+        };
+      }
+      return logs();
+    });
+
+    const store = createDevboxStore([box], undefined, {
+      async createBox() {
+        return { box };
+      },
+      async listBoxes() {
+        return [box];
+      },
+      async startBox() {
+        return {};
+      },
+      async stopBox() {
+        return {};
+      },
+      async removeBox() {
+        return {};
+      },
+      async streamEvents() {
+        return emptyEvents();
+      },
+      streamBoxLogs
+    });
+
+    let latest = {
+      boxes: [box],
+      error: null,
+      loading: false,
+      openLogTabs: [] as string[],
+      activeLogTab: null as string | null,
+      logViewers: {} as Record<string, { lines: Array<{ line: string }> }>
+    };
+    const unsubscribe = store.subscribe((value) => {
+      latest = value;
+    });
+
+    await store.openLogs(box.id);
+    await store.openLogs(box.id, { tail: 50 });
+
+    expect(streamBoxLogs).toHaveBeenCalledTimes(2);
+    expect(streamBoxLogs).toHaveBeenNthCalledWith(
+      2,
+      box.id,
+      expect.objectContaining({ follow: false, tail: 50 })
+    );
+    expect(latest.logViewers[box.id]?.lines).toEqual([
+      expect.objectContaining({ line: 'snapshot-50' })
+    ]);
+
+    unsubscribe();
+  });
+
   it('starts follow stream and aborts when tab closes', async () => {
     const box = makeBox();
     let followAborted = false;

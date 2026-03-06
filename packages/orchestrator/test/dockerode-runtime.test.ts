@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { Readable } from 'node:stream';
+import { PassThrough, Readable } from 'node:stream';
 import type Dockerode from 'dockerode';
 
 import { DockerodeRuntime } from '../src/dockerode-runtime.js';
@@ -192,5 +192,30 @@ describe('DockerodeRuntime', () => {
         line: 'err line'
       }
     ]);
+  });
+
+  it('aborts follow log streams by destroying the Docker stream', async () => {
+    const raw = new PassThrough();
+    const destroySpy = vi.spyOn(raw, 'destroy');
+    const logs = vi.fn().mockResolvedValue(raw);
+    const runtime = new DockerodeRuntime({
+      getContainer: vi.fn().mockReturnValue({ logs }),
+      modem: { demuxStream: vi.fn() }
+    } as unknown as Dockerode);
+    const controller = new AbortController();
+
+    const consume = (async () => {
+      for await (const _event of runtime.streamContainerLogs('container-logs', {
+        follow: true,
+        signal: controller.signal
+      })) {
+        // no-op
+      }
+    })();
+
+    controller.abort();
+    await consume;
+
+    expect(destroySpy).toHaveBeenCalled();
   });
 });
