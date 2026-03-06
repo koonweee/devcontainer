@@ -32,7 +32,8 @@ export function buildInMemoryHarness(): {
   const orchestrator = new DevboxOrchestrator(
     runtime, boxes, jobs, runner, events,
     undefined, undefined,
-    tailnetConfig, tailscaleClient
+    tailnetConfig, tailscaleClient,
+    undefined
   );
   return { events, jobs, boxes, tailnetConfig, runner, runtime, tailscaleClient, orchestrator };
 }

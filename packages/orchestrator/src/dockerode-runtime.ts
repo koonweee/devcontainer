@@ -178,20 +178,19 @@ export class DockerodeRuntime implements DockerRuntime {
     await this.ensureImageInstalled(options.image);
 
     const hostConfig: Record<string, unknown> = {
-      Mounts: [
-        {
-          Type: 'volume',
-          Source: options.volumeName,
-          Target: '/workspace'
-        }
-      ],
-      NetworkMode: options.networkName
+      Mounts: options.mounts ?? []
     };
+    if (options.networkMode) {
+      hostConfig.NetworkMode = options.networkMode;
+    }
     if (options.devices?.length) {
       hostConfig.Devices = options.devices;
     }
     if (options.capAdd?.length) {
       hostConfig.CapAdd = options.capAdd;
+    }
+    if (options.capDrop?.length) {
+      hostConfig.CapDrop = options.capDrop;
     }
 
     const container = await this.docker.createContainer({

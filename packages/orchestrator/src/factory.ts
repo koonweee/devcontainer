@@ -11,6 +11,7 @@ import { HttpTailscaleClient } from './tailscale-client.js';
 export interface OrchestratorFactoryOptions {
   dbPath?: string;
   runtimeImage?: string;
+  tailscaleSidecarImage?: string;
   runtimeEnv?: Record<string, string>;
   runtimeEnvFile?: string;
 }
@@ -69,6 +70,10 @@ export function createOrchestrator(options?: OrchestratorFactoryOptions): Devbox
     options?.runtimeImage ??
     process.env.DEVBOX_RUNTIME_IMAGE ??
     'devbox-runtime:local';
+  const tailscaleSidecarImage =
+    options?.tailscaleSidecarImage ??
+    process.env.DEVBOX_TAILSCALE_SIDECAR_IMAGE ??
+    'devbox-tailscale-sidecar:local';
   const runtimeEnvFile =
     options?.runtimeEnvFile ??
     process.env.DEVBOX_RUNTIME_ENV_FILE ??
@@ -90,6 +95,7 @@ export function createOrchestrator(options?: OrchestratorFactoryOptions): Devbox
     runtimeImage,
     runtimeEnv,
     repositories.tailnetConfig,
-    tailscaleClient
+    tailscaleClient,
+    tailscaleSidecarImage
   );
 }

@@ -6,6 +6,7 @@ services:
     environment:
       DEVBOX_DB_PATH: /data/devbox.sqlite
       DEVBOX_RUNTIME_IMAGE: devbox-runtime:local
+      DEVBOX_TAILSCALE_SIDECAR_IMAGE: devbox-tailscale-sidecar:local
       DEVBOX_RUNTIME_ENV_FILE: /runtime/runtime.env
       DEVBOX_WEB_ORIGIN: http://localhost:4173,http://localhost:5173
     volumes:

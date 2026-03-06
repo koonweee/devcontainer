@@ -1,10 +1,23 @@
 export const MANAGED_LABELS = {
   managed: 'com.devbox.managed',
   boxId: 'com.devbox.box_id',
-  owner: 'com.devbox.owner'
+  owner: 'com.devbox.owner',
+  group: 'com.devbox.group',
+  role: 'com.devbox.role',
+  kind: 'com.devbox.kind'
 } as const;
 
 export const MANAGED_OWNER = 'orchestrator';
+
+export type ManagedResourceRole = 'workspace' | 'tailscale' | 'shared';
+export type ManagedResourceKind = 'container' | 'volume' | 'network';
+
+export interface ManagedResourceLabelSpec {
+  boxId: string;
+  group: string;
+  role: ManagedResourceRole;
+  kind: ManagedResourceKind;
+}
 
 export type ContainerRuntimeStatus =
   | 'created'
@@ -29,16 +42,24 @@ export interface ContainerDevice {
   CgroupPermissions: string;
 }
 
+export interface ContainerMount {
+  Type: 'volume';
+  Source: string;
+  Target: string;
+  ReadOnly?: boolean;
+}
+
 export interface CreateContainerOptions {
   name: string;
   image: string;
-  networkName: string;
-  volumeName: string;
   labels: Record<string, string>;
   env?: Record<string, string>;
   command?: string[];
+  mounts?: ContainerMount[];
+  networkMode?: string;
   devices?: ContainerDevice[];
   capAdd?: string[];
+  capDrop?: string[];
 }
 
 export interface RuntimeLogLine {
@@ -82,19 +103,28 @@ export interface DockerRuntime {
   streamContainerEvents(options?: RuntimeEventOptions): AsyncIterable<ContainerRuntimeEvent>;
 }
 
-export function managedLabels(boxId: string): Record<string, string> {
+export function managedLabels(spec: ManagedResourceLabelSpec): Record<string, string> {
   return {
     [MANAGED_LABELS.managed]: 'true',
-    [MANAGED_LABELS.boxId]: boxId,
-    [MANAGED_LABELS.owner]: MANAGED_OWNER
+    [MANAGED_LABELS.boxId]: spec.boxId,
+    [MANAGED_LABELS.owner]: MANAGED_OWNER,
+    [MANAGED_LABELS.group]: spec.group,
+    [MANAGED_LABELS.role]: spec.role,
+    [MANAGED_LABELS.kind]: spec.kind
   };
 }
 
-export function assertManaged(labels: Record<string, string>, boxId: string): void {
+export function assertManaged(
+  labels: Record<string, string>,
+  spec: ManagedResourceLabelSpec
+): void {
   if (
     labels[MANAGED_LABELS.managed] !== 'true' ||
-    labels[MANAGED_LABELS.boxId] !== boxId ||
-    labels[MANAGED_LABELS.owner] !== MANAGED_OWNER
+    labels[MANAGED_LABELS.boxId] !== spec.boxId ||
+    labels[MANAGED_LABELS.owner] !== MANAGED_OWNER ||
+    labels[MANAGED_LABELS.group] !== spec.group ||
+    labels[MANAGED_LABELS.role] !== spec.role ||
+    labels[MANAGED_LABELS.kind] !== spec.kind
   ) {
     throw new Error('Resource is not a managed devbox resource.');
   }

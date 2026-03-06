@@ -7,8 +7,10 @@ import { JobRunner } from '../job-runner.js';
 import { DevboxOrchestrator } from '../orchestrator.js';
 import { createSqliteRepositories } from '../repositories.js';
 import { MockDockerRuntime } from './mock-runtime.js';
+import { InMemoryTailnetConfigRepository } from './in-memory-repositories.js';
+import { MockTailscaleClient } from './mock-tailscale-client.js';
 
-type Mode = 'reuse' | 'migration';
+type Mode = 'reuse' | 'migration-empty' | 'migration-gate';
 
 async function waitForJob(
   orchestrator: DevboxOrchestrator,
@@ -35,12 +37,25 @@ async function runReuseCheck(): Promise<void> {
   const events = new OrchestratorEvents();
   const runner = new JobRunner(repositories.jobs, events);
   const runtime = new MockDockerRuntime();
+  const tailnetConfig = new InMemoryTailnetConfigRepository();
+  tailnetConfig.set({
+    tailnet: 'example.com',
+    oauthClientId: 'client-id',
+    oauthClientSecret: 'client-secret'
+  });
+  const tailscaleClient = new MockTailscaleClient();
   const orchestrator = new DevboxOrchestrator(
     runtime,
     repositories.boxes,
     repositories.jobs,
     runner,
-    events
+    events,
+    undefined,
+    {},
+    tailnetConfig,
+    tailscaleClient,
+    undefined,
+    [1, 1, 1]
   );
 
   try {
@@ -72,15 +87,13 @@ async function runReuseCheck(): Promise<void> {
   }
 }
 
-function runMigrationCheck(): void {
-  const tempDir = mkdtempSync(path.join(tmpdir(), 'devbox-migration-'));
-  const dbPath = path.join(tempDir, 'devbox.sqlite');
-  const legacyRepositories = createSqliteRepositories(dbPath);
+function writeLegacyBoxesTable(dbPath: string, withRow: boolean): void {
+  const repositories = createSqliteRepositories(dbPath);
   const timestamp = new Date().toISOString();
 
-  legacyRepositories.db.exec('DROP INDEX IF EXISTS boxes_name_unique');
-  legacyRepositories.db.exec('DROP TABLE IF EXISTS boxes');
-  legacyRepositories.db.exec(`
+  repositories.db.exec('DROP INDEX IF EXISTS boxes_name_unique');
+  repositories.db.exec('DROP TABLE IF EXISTS boxes');
+  repositories.db.exec(`
     CREATE TABLE boxes (
       id TEXT PRIMARY KEY,
       name TEXT UNIQUE NOT NULL,
@@ -96,39 +109,48 @@ function runMigrationCheck(): void {
     );
   `);
 
-  legacyRepositories.db
-    .prepare(
+  if (withRow) {
+    repositories.db
+      .prepare(
+        `
+        INSERT INTO boxes (
+          id,
+          name,
+          image,
+          status,
+          container_id,
+          network_name,
+          volume_name,
+          tailnet_url,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
-      INSERT INTO boxes (
-        id,
-        name,
-        image,
-        status,
-        container_id,
-        network_name,
-        volume_name,
-        tailnet_url,
-        created_at,
-        updated_at,
-        deleted_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `
-    )
-    .run(
-      'legacy-id',
-      'legacy-box',
-      'debian:trixie-slim',
-      'stopped',
-      null,
-      'legacy-net',
-      'legacy-vol',
-      null,
-      timestamp,
-      timestamp,
-      timestamp
-    );
-  legacyRepositories.db.close();
+      .run(
+        'legacy-id',
+        'legacy-box',
+        'debian:trixie-slim',
+        'stopped',
+        null,
+        'legacy-net',
+        'legacy-vol',
+        null,
+        timestamp,
+        timestamp,
+        timestamp
+      );
+  }
+
+  repositories.db.close();
+}
+
+function runEmptyMigrationCheck(): void {
+  const tempDir = mkdtempSync(path.join(tmpdir(), 'devbox-migration-empty-'));
+  const dbPath = path.join(tempDir, 'devbox.sqlite');
+  writeLegacyBoxesTable(dbPath, false);
 
   const repositories = createSqliteRepositories(dbPath);
   try {
@@ -140,30 +162,13 @@ function runMigrationCheck(): void {
       throw new Error('legacy deleted_at column still exists after reset');
     }
 
-    const legacyCount = repositories.db.prepare('SELECT COUNT(*) AS count FROM boxes').get() as
-      | { count?: number }
-      | undefined;
-    if ((legacyCount?.count ?? 0) !== 0) {
-      throw new Error('expected destructive reset to remove legacy box rows');
-    }
-
-    const indexSqlRow = repositories.db
-      .prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'boxes_name_unique'")
-      .get() as { sql?: string } | undefined;
-    const indexSql = indexSqlRow?.sql ?? '';
-    if (!indexSql.includes('ON boxes(name)')) {
-      throw new Error('global name unique index was not created');
-    }
-    if (indexSql.includes('deleted_at')) {
-      throw new Error('legacy partial unique index filter should not be present');
-    }
-
     repositories.boxes.create({
       name: 'legacy-box',
       image: 'debian:trixie-slim',
       status: 'creating',
       networkName: 'legacy-net-2',
-      volumeName: 'legacy-vol-2'
+      workspaceVolumeName: 'legacy-workspace-vol-2',
+      tailscaleStateVolumeName: 'legacy-tsstate-vol-2'
     });
 
     let duplicateAllowed = false;
@@ -173,7 +178,8 @@ function runMigrationCheck(): void {
         image: 'debian:trixie-slim',
         status: 'creating',
         networkName: 'legacy-net-3',
-        volumeName: 'legacy-vol-3'
+        workspaceVolumeName: 'legacy-workspace-vol-3',
+        tailscaleStateVolumeName: 'legacy-tsstate-vol-3'
       });
       duplicateAllowed = true;
     } catch {
@@ -188,6 +194,24 @@ function runMigrationCheck(): void {
   }
 }
 
+function runMigrationGateCheck(): void {
+  const tempDir = mkdtempSync(path.join(tmpdir(), 'devbox-migration-gate-'));
+  const dbPath = path.join(tempDir, 'devbox.sqlite');
+  writeLegacyBoxesTable(dbPath, true);
+
+  try {
+    createSqliteRepositories(dbPath);
+    throw new Error('expected legacy box gate to fail startup');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!message.includes('Legacy box records detected')) {
+      throw error;
+    }
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
 async function main(): Promise<void> {
   const mode = process.argv[2] as Mode | undefined;
   if (mode === 'reuse') {
@@ -195,8 +219,13 @@ async function main(): Promise<void> {
     console.log('ok');
     return;
   }
-  if (mode === 'migration') {
-    runMigrationCheck();
+  if (mode === 'migration-empty') {
+    runEmptyMigrationCheck();
+    console.log('ok');
+    return;
+  }
+  if (mode === 'migration-gate') {
+    runMigrationGateCheck();
     console.log('ok');
     return;
   }

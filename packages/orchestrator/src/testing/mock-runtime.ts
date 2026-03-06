@@ -11,9 +11,11 @@ import type {
 
 interface FakeContainer {
   id: string;
+  name: string;
   labels: Record<string, string>;
   status: ContainerRuntimeStatus;
   logs: RuntimeLogLine[];
+  options: CreateContainerOptions;
 }
 
 /** Simulates Docker runtime behavior without touching Docker Engine. */
@@ -54,9 +56,11 @@ export class MockDockerRuntime implements DockerRuntime {
     const id = `mock-${this.containerCounter}`;
     this.containers.set(id, {
       id,
+      name: options.name,
       labels: options.labels,
       status: 'created',
-      logs: []
+      logs: [],
+      options
     });
     return id;
   }

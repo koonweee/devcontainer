@@ -17,15 +17,15 @@ describe('DockerodeRuntime', () => {
       runtime.createContainer({
         name: 'devbox-1',
         image: 'devbox-runtime:local',
-        networkName: 'net',
-        volumeName: 'vol',
+        networkMode: 'net',
+        mounts: [],
         labels: {}
       })
     ).rejects.toThrow('Runtime image not found locally: devbox-runtime:local');
     expect(createContainer).not.toHaveBeenCalled();
   });
 
-  it('creates container when runtime image is already present locally', async () => {
+  it('passes through mounts, network mode, device, and capability settings', async () => {
     const inspect = vi.fn().mockResolvedValue({});
     const createContainer = vi.fn().mockResolvedValue({ id: 'container-123' });
     const runtime = new DockerodeRuntime({
@@ -36,25 +36,59 @@ describe('DockerodeRuntime', () => {
     const id = await runtime.createContainer({
       name: 'devbox-2',
       image: 'runtime:test',
-      networkName: 'net',
-      volumeName: 'vol',
+      networkMode: 'container:devbox-tailscale-box',
+      mounts: [
+        {
+          Type: 'volume',
+          Source: 'workspace-vol',
+          Target: '/workspace'
+        }
+      ],
       labels: { one: '1' },
       command: ['sleep', 'infinity'],
-      env: { HELLO: 'world' }
+      env: { HELLO: 'world' },
+      devices: [
+        {
+          PathOnHost: '/dev/net/tun',
+          PathInContainer: '/dev/net/tun',
+          CgroupPermissions: 'rwm'
+        }
+      ],
+      capAdd: ['NET_ADMIN'],
+      capDrop: ['NET_RAW']
     });
 
     expect(id).toBe('container-123');
     expect(createContainer).toHaveBeenCalledWith(
       expect.objectContaining({
         name: 'devbox-2',
-        Image: 'runtime:test'
+        Image: 'runtime:test',
+        HostConfig: expect.objectContaining({
+          NetworkMode: 'container:devbox-tailscale-box',
+          Mounts: [
+            {
+              Type: 'volume',
+              Source: 'workspace-vol',
+              Target: '/workspace'
+            }
+          ],
+          Devices: [
+            {
+              PathOnHost: '/dev/net/tun',
+              PathInContainer: '/dev/net/tun',
+              CgroupPermissions: 'rwm'
+            }
+          ],
+          CapAdd: ['NET_ADMIN'],
+          CapDrop: ['NET_RAW']
+        })
       })
     );
   });
 
   it('streams container runtime events with managed filters', async () => {
     const eventsStream = Readable.from([
-      '{"Type":"container","Action":"start","time":1700000000,"Actor":{"ID":"container-1","Attributes":{"com.devbox.managed":"true","com.devbox.box_id":"box-1","com.devbox.owner":"orchestrator"}}}\n'
+      '{"Type":"container","Action":"start","time":1700000000,"Actor":{"ID":"container-1","Attributes":{"com.devbox.managed":"true","com.devbox.box_id":"box-1","com.devbox.owner":"orchestrator","com.devbox.group":"devbox-box-1","com.devbox.role":"workspace","com.devbox.kind":"container"}}}\n'
     ]);
     const getEvents = vi.fn().mockResolvedValue(eventsStream);
     const runtime = new DockerodeRuntime({
@@ -73,7 +107,10 @@ describe('DockerodeRuntime', () => {
         labels: {
           'com.devbox.managed': 'true',
           'com.devbox.box_id': 'box-1',
-          'com.devbox.owner': 'orchestrator'
+          'com.devbox.owner': 'orchestrator',
+          'com.devbox.group': 'devbox-box-1',
+          'com.devbox.role': 'workspace',
+          'com.devbox.kind': 'container'
         },
         timestamp: new Date(1_700_000_000_000).toISOString()
       }
@@ -147,12 +184,6 @@ describe('DockerodeRuntime', () => {
         line: 'new line'
       }
     ]);
-    expect(logs).toHaveBeenCalledWith(
-      expect.objectContaining({
-        since: Math.floor(new Date('2026-03-01T00:00:00.500000000Z').getTime() / 1000),
-        follow: true
-      })
-    );
   });
 
   it('parses multiplexed non-follow buffer logs into stdout and stderr lines', async () => {

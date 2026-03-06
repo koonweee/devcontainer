@@ -1,16 +1,26 @@
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 
-import type { Box, Job, JobFilter, JobStatus, JobType, TailnetConfig, TailnetConfigInput } from './types.js';
+import type {
+  InternalBox,
+  Job,
+  JobFilter,
+  JobStatus,
+  JobType,
+  TailnetConfig,
+  TailnetConfigInput
+} from './types.js';
 
 export interface BoxCreate {
   id?: string;
   name: string;
   image: string;
-  status: Box['status'];
-  containerId?: string | null;
+  status: InternalBox['status'];
+  workspaceContainerId?: string | null;
+  tailscaleContainerId?: string | null;
   networkName: string;
-  volumeName: string;
+  workspaceVolumeName: string;
+  tailscaleStateVolumeName: string;
   tailnetUrl?: string | null;
   tailnetDeviceId?: string | null;
 }
@@ -26,11 +36,11 @@ export interface JobCreate {
 }
 
 export interface BoxRepository {
-  create(input: BoxCreate): Box;
-  update(boxId: string, patch: Partial<Omit<Box, 'id' | 'createdAt'>>): Box;
-  list(): Box[];
-  get(boxId: string): Box | null;
-  getByName(name: string): Box | null;
+  create(input: BoxCreate): InternalBox;
+  update(boxId: string, patch: Partial<Omit<InternalBox, 'id' | 'createdAt'>>): InternalBox;
+  list(): InternalBox[];
+  get(boxId: string): InternalBox | null;
+  getByName(name: string): InternalBox | null;
   delete(boxId: string): void;
   count(): number;
 }
@@ -52,15 +62,17 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-function mapBox(row: Record<string, unknown>): Box {
+function mapBox(row: Record<string, unknown>): InternalBox {
   return {
     id: String(row.id),
     name: String(row.name),
     image: String(row.image),
-    status: row.status as Box['status'],
-    containerId: (row.container_id as string | null) ?? null,
+    status: row.status as InternalBox['status'],
+    workspaceContainerId: (row.workspace_container_id as string | null) ?? null,
+    tailscaleContainerId: (row.tailscale_container_id as string | null) ?? null,
     networkName: String(row.network_name),
-    volumeName: String(row.volume_name),
+    workspaceVolumeName: String(row.workspace_volume_name),
+    tailscaleStateVolumeName: String(row.tailscale_state_volume_name),
     tailnetUrl: (row.tailnet_url as string | null) ?? null,
     tailnetDeviceId: (row.tailnet_device_id as string | null) ?? null,
     createdAt: String(row.created_at),
@@ -101,9 +113,11 @@ const BOXES_COLUMNS_SQL = `
   name TEXT NOT NULL,
   image TEXT NOT NULL,
   status TEXT NOT NULL,
-  container_id TEXT,
+  workspace_container_id TEXT,
+  tailscale_container_id TEXT,
   network_name TEXT NOT NULL,
-  volume_name TEXT NOT NULL,
+  workspace_volume_name TEXT NOT NULL,
+  tailscale_state_volume_name TEXT NOT NULL,
   tailnet_url TEXT,
   tailnet_device_id TEXT,
   created_at TEXT NOT NULL,
@@ -157,21 +171,29 @@ function hasBoxesTable(db: DatabaseSync): boolean {
   return row !== undefined;
 }
 
-function hasDeletedAtColumn(db: DatabaseSync): boolean {
+function hasColumn(db: DatabaseSync, table: string, column: string): boolean {
+  const columns = db.prepare(`PRAGMA table_info('${table}')`).all() as Array<{ name?: unknown }>;
+  return columns.some((entry) => entry.name === column);
+}
+
+function isLegacyBoxesSchema(db: DatabaseSync): boolean {
   if (!hasBoxesTable(db)) {
     return false;
   }
 
-  const columns = db.prepare("PRAGMA table_info('boxes')").all() as Array<{ name?: unknown }>;
-  return columns.some((column) => column.name === 'deleted_at');
+  return (
+    hasColumn(db, 'boxes', 'container_id') ||
+    hasColumn(db, 'boxes', 'volume_name') ||
+    hasColumn(db, 'boxes', 'deleted_at')
+  );
 }
 
-function hasColumn(db: DatabaseSync, table: string, column: string): boolean {
-  const columns = db.prepare(`PRAGMA table_info('${table}')`).all() as Array<{ name?: unknown }>;
-  return columns.some((c) => c.name === column);
+function countRows(db: DatabaseSync, table: string): number {
+  const row = db.prepare(`SELECT COUNT(*) as count FROM ${table}`).get() as { count?: number } | undefined;
+  return Number(row?.count ?? 0);
 }
 
-function resetBoxesTableForHardDeletes(db: DatabaseSync): void {
+function rebuildBoxesTable(db: DatabaseSync): void {
   db.exec('BEGIN');
   try {
     db.exec('DROP TABLE IF EXISTS boxes');
@@ -186,14 +208,16 @@ function resetBoxesTableForHardDeletes(db: DatabaseSync): void {
 export function initializeSchema(db: DatabaseSync): void {
   db.exec(CREATE_JOBS_TABLE_SQL);
 
-  if (hasDeletedAtColumn(db)) {
-    resetBoxesTableForHardDeletes(db);
+  if (isLegacyBoxesSchema(db)) {
+    const legacyBoxCount = countRows(db, 'boxes');
+    if (legacyBoxCount > 0) {
+      throw new Error(
+        `Legacy box records detected (${legacyBoxCount}). Remove all existing boxes before upgrading to the sidecar runtime.`
+      );
+    }
+    rebuildBoxesTable(db);
   } else {
     db.exec(CREATE_BOXES_TABLE_SQL);
-  }
-
-  if (hasBoxesTable(db) && !hasColumn(db, 'boxes', 'tailnet_device_id')) {
-    db.exec('ALTER TABLE boxes ADD COLUMN tailnet_device_id TEXT');
   }
 
   db.exec(CREATE_NAME_UNIQUE_INDEX_SQL);
@@ -204,14 +228,28 @@ export function initializeSchema(db: DatabaseSync): void {
 export class SqliteBoxRepository implements BoxRepository {
   constructor(private readonly db: DatabaseSync) {}
 
-  create(input: BoxCreate): Box {
+  create(input: BoxCreate): InternalBox {
     const id = input.id ?? randomUUID();
     const timestamp = nowIso();
     this.db
       .prepare(
         `
-      INSERT INTO boxes (id, name, image, status, container_id, network_name, volume_name, tailnet_url, tailnet_device_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO boxes (
+        id,
+        name,
+        image,
+        status,
+        workspace_container_id,
+        tailscale_container_id,
+        network_name,
+        workspace_volume_name,
+        tailscale_state_volume_name,
+        tailnet_url,
+        tailnet_device_id,
+        created_at,
+        updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
       )
       .run(
@@ -219,9 +257,11 @@ export class SqliteBoxRepository implements BoxRepository {
         input.name,
         input.image,
         input.status,
-        input.containerId ?? null,
+        input.workspaceContainerId ?? null,
+        input.tailscaleContainerId ?? null,
         input.networkName,
-        input.volumeName,
+        input.workspaceVolumeName,
+        input.tailscaleStateVolumeName,
         input.tailnetUrl ?? null,
         input.tailnetDeviceId ?? null,
         timestamp,
@@ -231,9 +271,9 @@ export class SqliteBoxRepository implements BoxRepository {
     return this.getRequired(id);
   }
 
-  update(boxId: string, patch: Partial<Omit<Box, 'id' | 'createdAt'>>): Box {
+  update(boxId: string, patch: Partial<Omit<InternalBox, 'id' | 'createdAt'>>): InternalBox {
     const current = this.getRequired(boxId);
-    const updated: Box = {
+    const updated: InternalBox = {
       ...current,
       ...patch,
       updatedAt: nowIso()
@@ -243,7 +283,7 @@ export class SqliteBoxRepository implements BoxRepository {
       .prepare(
         `
       UPDATE boxes
-      SET name = ?, image = ?, status = ?, container_id = ?, network_name = ?, volume_name = ?, tailnet_url = ?, tailnet_device_id = ?, updated_at = ?
+      SET name = ?, image = ?, status = ?, workspace_container_id = ?, tailscale_container_id = ?, network_name = ?, workspace_volume_name = ?, tailscale_state_volume_name = ?, tailnet_url = ?, tailnet_device_id = ?, updated_at = ?
       WHERE id = ?
       `
       )
@@ -251,9 +291,11 @@ export class SqliteBoxRepository implements BoxRepository {
         updated.name,
         updated.image,
         updated.status,
-        updated.containerId,
+        updated.workspaceContainerId,
+        updated.tailscaleContainerId,
         updated.networkName,
-        updated.volumeName,
+        updated.workspaceVolumeName,
+        updated.tailscaleStateVolumeName,
         updated.tailnetUrl,
         updated.tailnetDeviceId,
         updated.updatedAt,
@@ -263,7 +305,7 @@ export class SqliteBoxRepository implements BoxRepository {
     return this.getRequired(boxId);
   }
 
-  list(): Box[] {
+  list(): InternalBox[] {
     const rows = this.db.prepare('SELECT * FROM boxes ORDER BY created_at DESC').all() as Record<
       string,
       unknown
@@ -271,14 +313,14 @@ export class SqliteBoxRepository implements BoxRepository {
     return rows.map(mapBox);
   }
 
-  get(boxId: string): Box | null {
+  get(boxId: string): InternalBox | null {
     const row = this.db.prepare('SELECT * FROM boxes WHERE id = ?').get(boxId) as
       | Record<string, unknown>
       | undefined;
     return row ? mapBox(row) : null;
   }
 
-  getByName(name: string): Box | null {
+  getByName(name: string): InternalBox | null {
     const row = this.db.prepare('SELECT * FROM boxes WHERE name = ?').get(name) as
       | Record<string, unknown>
       | undefined;
@@ -290,11 +332,10 @@ export class SqliteBoxRepository implements BoxRepository {
   }
 
   count(): number {
-    const row = this.db.prepare('SELECT COUNT(*) as cnt FROM boxes').get() as { cnt: number };
-    return Number(row.cnt);
+    return countRows(this.db, 'boxes');
   }
 
-  private getRequired(boxId: string): Box {
+  private getRequired(boxId: string): InternalBox {
     const box = this.get(boxId);
     if (!box) {
       throw new Error(`Box not found: ${boxId}`);

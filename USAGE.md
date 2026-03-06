@@ -2,8 +2,10 @@
 ## For development
 1. Install Node.js 22+ and Docker.
 2. Install dependencies: `npm install`.
-3. Review env defaults in `ENV.md`; set runtime box env values in `docker/runtime/runtime.env` as needed.
-4. Build the runtime image from `docker/runtime/Dockerfile`: `npm run build:runtime-image`.
+3. Review env defaults in `ENV.md`; set workspace-runtime env values in `docker/runtime/runtime.env` as needed.
+4. Build both local box images: `npm run build:runtime-image`.
+   - This builds the workspace image from `docker/runtime/Dockerfile`.
+   - This also builds the Tailscale sidecar image from `docker/tailscale-sidecar/Dockerfile`.
 5. Generate contracts: `npm run gen:client`.
 6. Start API and web with hot reload:
    ```sh
@@ -23,16 +25,16 @@
      - `devices:core` write (device lookup + cleanup delete)
    - Ensure your ACL `tagOwners` allows configured tags (default `tag:devcontainer`), for example:
      - `"tagOwners": { "tag:devcontainer": ["autogroup:admin", "tag:devcontainer"] }`
-   - Runtime boxes fail fast if neither an injected auth key nor persisted Tailscale state is available.
 9. Verify changes: `npm run typecheck && npm run test`.
 10. Match CI locally before opening a PR: `npm run lint && npm run test && npm run build && npm run check:client`.
 
 ## For deployment
-1. Build and publish your runtime box image from `docker/runtime/Dockerfile` (or equivalent CI build), then set `DEVBOX_RUNTIME_IMAGE` to that tag/digest.
-2. Configure deployment env values in `ENV.md` and set box-runtime envs in `docker/runtime/runtime.env`.
-3. Deploy `api` and `web` as separate containers/services, and mount persistent storage for SQLite at `DEVBOX_DB_PATH`.
-4. Ensure API container can access `/var/run/docker.sock`; do not grant that mount to web/CLI.
-5. Run post-deploy checks: API health, create/list/start/stop/remove flows, and logs/status streaming.
+1. Build and publish both box images, then set `DEVBOX_RUNTIME_IMAGE` and `DEVBOX_TAILSCALE_SIDECAR_IMAGE` to those tags or digests.
+2. Configure deployment env values in `ENV.md` and set workspace-runtime envs in `docker/runtime/runtime.env`.
+3. Before rolling out the sidecar runtime, ensure there are zero existing box rows; this upgrade fails fast if legacy single-container box records still exist.
+4. Deploy `api` and `web` as separate containers/services, and mount persistent storage for SQLite at `DEVBOX_DB_PATH`.
+5. Ensure API container can access `/var/run/docker.sock`; do not grant that mount to web/CLI.
+6. Run post-deploy checks: API health, create/list/start/stop/remove flows, and logs/status streaming.
 
 # User flows
 
@@ -56,21 +58,24 @@
    - CLI: `npm run -w @devbox/cli start -- ls`
 3. Watch live status updates:
    - API SSE: `GET /v1/events`
-   - Web: subscribes after hydration and applies `box.updated` and `box.removed` events directly; status and removals stream live without per-event full-list polling (external container deletion removes the box from state).
-4. Stream box logs:
+   - Web: subscribes after hydration and applies `box.updated` and `box.removed` events directly; status and removals stream live without per-event full-list polling.
+4. Connect over Tailnet SSH:
+   - Use the box hostname shown as `tailnetUrl`.
+   - The workspace shares the sidecar network namespace, so Tailnet access still targets the box hostname even though the privileged networking stack lives in the sidecar.
+5. Stream box logs:
    - API SSE: `GET /v1/boxes/:boxId/logs?follow=true&tail=200&since=<iso-or-unix-seconds>`
    - CLI snapshot default: `npm run -w @devbox/cli start -- logs <boxId|name>`
    - CLI follow: `npm run -w @devbox/cli start -- logs -f <boxId|name>`
    - CLI bounded history: `npm run -w @devbox/cli start -- logs <boxId|name> --tail 200 --since 2026-01-01T00:00:00Z`
    - Web: click `View logs` on any box to open tabbed log viewers; tabs keep per-box buffers in memory, and follow mode is opt-in per tab.
-5. Stop a box:
+6. Stop a box:
    - API: `POST /v1/boxes/:boxId/stop`
    - CLI: `npm run -w @devbox/cli start -- stop <boxId|name>`
-6. Start a stopped box:
+7. Start a stopped box:
    - API: `POST /v1/boxes/:boxId/start`
    - Web: start button shown when box status is `stopped`
    - CLI: `npm run -w @devbox/cli start -- start <boxId|name>`
-7. Remove a box:
+8. Remove a box:
    - API: `DELETE /v1/boxes/:boxId`
-   - Behavior: API remove performs stop-then-remove for managed containers before network/volume cleanup.
+   - Behavior: API remove cleans up both grouped containers, the per-box network, and the two per-box volumes.
    - CLI: `npm run -w @devbox/cli start -- rm <boxId|name>`

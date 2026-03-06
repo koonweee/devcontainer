@@ -9,11 +9,7 @@ function makeBox(overrides: Partial<Box> = {}): Box {
     name: 'box-one',
     image: 'runtime:test',
     status: 'running',
-    containerId: 'container-1',
-    networkName: 'net-1',
-    volumeName: 'vol-1',
     tailnetUrl: null,
-    tailnetDeviceId: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z').toISOString(),
     updatedAt: new Date('2026-01-01T00:00:00.000Z').toISOString(),
     ...overrides

@@ -8,7 +8,9 @@ Canonical reference for runtime environment variables and defaults.
 
 ## Required by context
 - `DEVBOX_RUNTIME_IMAGE`
-  - Set this in deployment to a published runtime image tag/digest.
+  - Set this in deployment to a published workspace image tag/digest.
+- `DEVBOX_TAILSCALE_SIDECAR_IMAGE`
+  - Set this in deployment to a published Tailscale sidecar image tag/digest.
 - `DEVBOX_PUBLIC_API_URL`
   - Set this when browser clients cannot reach API at the default.
 - `DEVBOX_INTERNAL_API_URL`
@@ -24,12 +26,16 @@ Canonical reference for runtime environment variables and defaults.
   - Recommendation: use a persistent volume-backed path in containers.
 
 - `DEVBOX_RUNTIME_IMAGE` (default: `devbox-runtime:local`)
-  - Fixed Docker image used for all box creation requests.
+  - Fixed workspace image used for all box creation requests.
   - Recommendation: build/tag from `docker/runtime/Dockerfile` before starting API (`npm run build:runtime-image`).
 
+- `DEVBOX_TAILSCALE_SIDECAR_IMAGE` (default: `devbox-tailscale-sidecar:local`)
+  - Fixed Tailscale sidecar image paired with each created box.
+  - Recommendation: build/tag from `docker/tailscale-sidecar/Dockerfile` together with the workspace image.
+
 - `DEVBOX_RUNTIME_ENV_FILE` (default fallback resolves `docker/runtime/runtime.env` from repo)
-  - File path containing env entries to inject into every created box.
-  - Recommendation: keep box-runtime env in `docker/runtime/runtime.env` instead of root `.env`.
+  - File path containing env entries to inject into every created workspace container.
+  - Recommendation: keep workspace-runtime env in `docker/runtime/runtime.env` instead of root `.env`.
   - Example file entries: `TZ=UTC`.
 
 - `DEVBOX_INTERNAL_API_URL` (default: `http://localhost:3000`)
@@ -48,16 +54,16 @@ Canonical reference for runtime environment variables and defaults.
   - API CORS allowlist for web origins (comma-separated).
   - Recommendation: include every browser origin that should call API directly.
 
-## Runtime container env (injected by orchestrator into each box)
-These are set automatically by the orchestrator when Tailscale is configured. They are not user-configurable env vars.
+## Runtime container env (injected by orchestrator)
+These are orchestrator-managed sidecar env vars. They are not user-configurable env vars and are not injected into the workspace container.
 
 - `DEVBOX_TAILSCALE_AUTHKEY` - Per-box Tailscale auth key (minted at create time, never persisted)
-- `DEVBOX_TAILSCALE_HOSTNAME` - Tailscale hostname for the box (e.g. `devbox-mybox-a1b2c3d4`)
+- `DEVBOX_TAILSCALE_HOSTNAME` - Tailscale hostname for the box (for example `devbox-mybox-a1b2c3d4`)
+- `DEVBOX_TAILSCALE_STATE_DIR` - Optional sidecar state dir override used by the sidecar entrypoint (defaults to `/var/lib/tailscale`)
 
 ## Notes
 - API bind/port are fixed by the service (`0.0.0.0:3000`) and are not configured through env vars.
-- Keep runtime container env entries in `docker/runtime/runtime.env`.
-- Tailscale runtime state path is fixed at `/workspace/.tailscale` inside each box (not user-configurable).
+- Keep workspace runtime env entries in `docker/runtime/runtime.env`.
 - Runtime boxes only support Tailscale SSH. Password or local SSH-key auth is not part of the supported runtime env contract.
 - Tailnet credentials (OAuth client ID/secret) are stored in the SQLite database, not in env vars. Configure them via the web UI setup form or `devbox setup tailnet` CLI command.
 - Tailscale OAuth client must include `auth_keys` write and `devices:core` write scopes.
