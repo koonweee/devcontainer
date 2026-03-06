@@ -1,8 +1,12 @@
 # Devbox Platform
 
-> **Warning**: Web app authentication is not implemented yet. Implement OAuth login for the full web app before production deployment.
+> Self-hosted dev boxes for running multiple AI-agent workspaces with Tailscale access and a tighter Docker privilege boundary.
 
-Monorepo for a Docker-image-based dev box platform with strict privilege boundaries. Every dev box runs as a single Docker workspace container with Tailscale SSH enabled inside that runtime, which keeps SSH access simple and makes it straightforward to expose development services such as web apps over the Tailnet.
+This repo is a Docker-image-based dev box platform for individual developers who want to spin up multiple remote workspaces for AI agents without hand-rolling Docker automation. You define the dev environment in the runtime Dockerfile, then each box boots as one ready-to-use workspace container managed through a web app and CLI backed by a shared typed API.
+
+You can SSH into each box over Tailscale, reach box-local services over the tailnet, and keep separate agent tasks isolated in their own workspaces without normal host-port exposure. `docker.sock` stays confined to the API, while the web app and CLI remain unprivileged clients instead of getting direct Docker access.
+
+> **Warning**: Web app authentication is not implemented yet. Implement OAuth login for the full web app before production deployment.
 
 ## Workspace components
 
