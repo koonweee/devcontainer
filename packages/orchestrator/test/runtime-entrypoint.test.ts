@@ -2,8 +2,11 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
+
+const testDir = path.dirname(fileURLToPath(import.meta.url));
 
 function makeExecutable(filePath: string, contents: string): void {
   writeFileSync(filePath, contents, { mode: 0o755 });
@@ -13,17 +16,15 @@ function prepareEntrypointHarness(): {
   root: string;
   scriptPath: string;
   logsDir: string;
+  stateDir: string;
   stateFile: string;
   env: NodeJS.ProcessEnv;
 } {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'devbox-entrypoint-'));
+  const root = mkdtempSync(path.join(os.tmpdir(), 'devbox-runtime-entrypoint-'));
   const binDir = path.join(root, 'bin');
   const logsDir = path.join(root, 'logs');
   const runDir = path.join(root, 'run');
-  const workspaceDir = path.join(root, 'workspace');
-  const tailscaleRunDir = path.join(runDir, 'tailscale');
-  const sshdRunDir = path.join(runDir, 'sshd');
-  const stateDir = path.join(workspaceDir, '.tailscale');
+  const stateDir = path.join(root, 'var-lib-tailscale');
   const stateFile = path.join(stateDir, 'tailscaled.state');
   mkdirSync(binDir, { recursive: true });
   mkdirSync(logsDir, { recursive: true });
@@ -31,16 +32,8 @@ function prepareEntrypointHarness(): {
 
   makeExecutable(path.join(binDir, 'id'), '#!/bin/sh\nexit 0\n');
   makeExecutable(
-    path.join(binDir, 'iptables'),
-    `#!/bin/sh\necho "$@" >> "${path.join(logsDir, 'iptables.log')}"\nexit 0\n`
-  );
-  makeExecutable(
     path.join(binDir, 'tailscale'),
     `#!/bin/sh\necho "$@" >> "${path.join(logsDir, 'tailscale.log')}"\nexit 0\n`
-  );
-  makeExecutable(
-    path.join(binDir, 'sshd'),
-    `#!/bin/sh\necho "$@" >> "${path.join(logsDir, 'sshd.log')}"\nexit 0\n`
   );
   makeExecutable(
     path.join(binDir, 'tailscaled'),
@@ -52,23 +45,26 @@ function prepareEntrypointHarness(): {
       '    --socket=*) socket="${arg#--socket=}" ;;',
       '  esac',
       'done',
-      'node -e "const fs=require(\'node:fs\'); const net=require(\'node:net\'); const path=require(\'node:path\'); const socket=process.argv[1]; fs.mkdirSync(path.dirname(socket), { recursive: true }); const server=net.createServer(); server.listen(socket); const shutdown=()=>server.close(()=>process.exit(0)); process.on(\'SIGTERM\', shutdown); process.on(\'SIGINT\', shutdown); setInterval(() => {}, 1000);" "$socket"'
+      'node -e "const fs=require(\'node:fs\'); const net=require(\'node:net\'); const path=require(\'node:path\'); const socket=process.argv[1]; fs.mkdirSync(path.dirname(socket), { recursive: true }); const server=net.createServer(); server.listen(socket, () => setTimeout(() => server.close(() => process.exit(0)), 1500)); const shutdown=()=>server.close(()=>process.exit(0)); process.on(\'SIGTERM\', shutdown); process.on(\'SIGINT\', shutdown);" "$socket"'
     ].join('\n')
   );
 
-  const source = readFileSync(path.resolve(process.cwd(), '../../docker/runtime/dev-entrypoint.sh'), 'utf8');
+  const source = readFileSync(path.resolve(testDir, '../../../docker/runtime/dev-entrypoint.sh'), 'utf8');
   const scriptPath = path.join(root, 'dev-entrypoint.sh');
   const rewritten = source
-    .replace('/workspace/.tailscale', stateDir)
-    .replace('/var/run/tailscale', tailscaleRunDir)
-    .replace('/var/run/sshd', sshdRunDir)
-    .replace('exec /usr/sbin/sshd -D -e', 'exec sshd -D -e');
+    .replaceAll('/var/lib/tailscale', stateDir)
+    .replaceAll('/var/run/tailscale', runDir)
+    .replace(
+      'wait "$TAILSCALED_PID"',
+      'kill "$TAILSCALED_PID" 2>/dev/null || true\nwait "$TAILSCALED_PID" 2>/dev/null || true'
+    );
   writeFileSync(scriptPath, rewritten, { mode: 0o755 });
 
   return {
     root,
     scriptPath,
     logsDir,
+    stateDir,
     stateFile,
     env: {
       ...process.env,
@@ -121,6 +117,8 @@ describe('runtime entrypoint', () => {
     expect(tailscaleLog).toContain('--authkey=tskey-auth-test');
     expect(tailscaleLog).toContain('--hostname=devbox-auth');
     expect(tailscaleLog).toContain('--ssh');
+    expect(result.stderr).not.toContain('sshd');
+    expect(result.stderr).not.toContain('iptables');
   });
 
   it('resumes from persisted state without requiring an auth key', () => {

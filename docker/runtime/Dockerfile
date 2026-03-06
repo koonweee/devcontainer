@@ -27,7 +27,6 @@ RUN apt-get update \
     mosh \
     zsh \
     git \
-    openssh-server \
     sudo \
     ripgrep \
     less \
@@ -37,24 +36,24 @@ RUN apt-get update \
     unzip \
     nodejs \
     tailscale \
-    iptables \
  && npm install -g @openai/codex @google/gemini-cli@latest \
  && npm cache clean --force \
  && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --gid "${DEV_GID}" "${DEV_USER}" \
  && useradd --uid "${DEV_UID}" --gid "${DEV_GID}" --create-home --shell /usr/bin/zsh "${DEV_USER}" \
- && mkdir -p /workspace /var/run/sshd /var/run/tailscale \
+ && mkdir -p /workspace /var/lib /var/run/tailscale \
+ && rm -rf /var/lib/tailscale \
+ && ln -s /workspace/.tailscale /var/lib/tailscale \
  && chown -R "${DEV_USER}:${DEV_USER}" /workspace \
  && echo "${DEV_USER} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/90-dev-user \
  && chmod 0440 /etc/sudoers.d/90-dev-user
 
-COPY sshd_config /etc/ssh/sshd_config
 COPY dev-entrypoint.sh /usr/local/bin/dev-entrypoint.sh
 RUN chmod +x /usr/local/bin/dev-entrypoint.sh
 
 WORKDIR /workspace
 
-EXPOSE 22 3000
+EXPOSE 3000
 
 ENTRYPOINT ["/usr/local/bin/dev-entrypoint.sh"]

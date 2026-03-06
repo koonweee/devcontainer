@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 
 import { createSqliteRepositories } from './repositories.js';
 import { OrchestratorEvents } from './events.js';
@@ -29,6 +29,9 @@ function parseRuntimeEnvFile(runtimeEnvFile: string): Record<string, string> {
   const runtimeEnv: Record<string, string> = {};
 
   if (!existsSync(runtimeEnvFile)) {
+    return runtimeEnv;
+  }
+  if (!statSync(runtimeEnvFile).isFile()) {
     return runtimeEnv;
   }
 

@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 
 import { describe, expect, it } from 'vitest';
 
-function runCheck(mode: 'reuse' | 'migration'): string {
+function runCheck(mode: 'reuse' | 'schema'): string {
   return execFileSync('npx', ['tsx', 'src/testing/sqlite-repositories-check.ts', mode], {
     cwd: process.cwd(),
     encoding: 'utf8'
@@ -15,8 +15,8 @@ describe('SQLite repositories schema behavior', () => {
     expect(output).toContain('ok');
   });
 
-  it('resets legacy soft-delete schema to hard-delete schema with global uniqueness', () => {
-    const output = runCheck('migration');
+  it('creates the single-container boxes schema without grouped runtime columns', () => {
+    const output = runCheck('schema');
     expect(output).toContain('ok');
   });
 });

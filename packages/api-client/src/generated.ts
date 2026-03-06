@@ -472,11 +472,7 @@ export interface components {
             name: string;
             image: string;
             status: "creating" | "starting" | "running" | "stopping" | "stopped" | "removing" | "error";
-            containerId: string | null;
-            networkName: string;
-            volumeName: string;
             tailnetUrl: string | null;
-            tailnetDeviceId: string | null;
             createdAt: string;
             updatedAt: string;
         };

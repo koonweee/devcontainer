@@ -100,6 +100,7 @@ This repo builds a Docker-image-based dev box platform. Keep implementations sim
 ## E2E verification (when applicable)
 - For user-facing behavior changes, include a Playwright scenario that confirms the behavior in the rendered UI, not only API/network responses.
 - Prefer assertions that cover both system signal correctness (event/response) and end-user-visible result.
+- If Playwright MCP fails to launch Chrome because it reports `Opening in existing browser session`, clear only the stale MCP-owned Chrome processes/profile (`ms-playwright/mcp-chrome`) and retry; do not disturb the user's normal Chrome profile.
 
 ## UI conventions (SvelteKit web app)
 - Use Tailwind CSS v4 utility classes; no scoped `<style>` blocks.

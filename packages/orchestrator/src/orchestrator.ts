@@ -6,8 +6,8 @@ import { JobRunner, publishJob } from './job-runner.js';
 import type { BoxRepository, JobRepository, TailnetConfigRepository } from './repositories.js';
 import {
   assertManaged,
-  MANAGED_LABELS,
   managedLabels,
+  MANAGED_LABELS,
   type ContainerRuntimeStatus,
   type DockerRuntime
 } from './runtime.js';
@@ -16,6 +16,7 @@ import type {
   Box,
   CreateBoxInput,
   CreateBoxResult,
+  InternalBox,
   Job,
   JobFilter,
   LogEvent,
@@ -23,6 +24,7 @@ import type {
   TailnetConfig,
   TailnetConfigInput
 } from './types.js';
+import { toPublicBox } from './types.js';
 import { validateCreateBoxInput } from './validation.js';
 
 function networkName(boxId: string): string {
@@ -30,7 +32,7 @@ function networkName(boxId: string): string {
 }
 
 function volumeName(boxId: string): string {
-  return `devbox-vol-${boxId}`;
+  return `devbox-workspace-${boxId}`;
 }
 
 function containerName(boxId: string): string {
@@ -50,7 +52,7 @@ function isBoxNameConstraintError(error: unknown): boolean {
   return error.message.includes('UNIQUE constraint failed: boxes.name');
 }
 
-const STABLE_RECONCILE_STATUSES = new Set<Box['status']>(['running', 'stopped', 'error']);
+const STABLE_RECONCILE_STATUSES = new Set<InternalBox['status']>(['running', 'stopped', 'error']);
 const RUNTIME_MONITOR_BACKOFF_MS = [250, 500, 1_000, 2_000, 5_000] as const;
 const RUNTIME_RECONCILE_ACTIONS = new Set([
   'start',
@@ -84,10 +86,9 @@ export class DevboxOrchestrator {
     private readonly runtimeImage = 'devbox-runtime:local',
     private readonly runtimeEnv: Record<string, string> = {},
     private readonly tailnetConfigs: TailnetConfigRepository | null = null,
-    private readonly tailscaleClient: TailscaleClient | null = null
+    private readonly tailscaleClient: TailscaleClient | null = null,
+    private readonly deviceCaptureRetryDelays: readonly number[] = DEVICE_CAPTURE_RETRY_DELAYS
   ) {}
-
-  // --- Tailnet config management ---
 
   async getTailnetConfig(): Promise<(Omit<TailnetConfig, 'oauthClientSecret'> & { oauthClientSecret: string }) | null> {
     if (!this.tailnetConfigs) {
@@ -122,8 +123,6 @@ export class DevboxOrchestrator {
     }
     this.tailnetConfigs.delete();
   }
-
-  // --- Box lifecycle ---
 
   async startRuntimeStatusMonitor(): Promise<void> {
     if (this.runtimeMonitorTask) {
@@ -163,6 +162,9 @@ export class DevboxOrchestrator {
     if (this.tailnetConfigs && !tailnetConfig) {
       throw new SetupRequiredError('Tailnet configuration required before creating boxes. Complete setup first.');
     }
+    if (!this.tailscaleClient) {
+      throw new SetupRequiredError('Tailscale client is required before creating boxes. Complete setup first.');
+    }
 
     const existing = this.boxes.getByName(input.name);
     if (existing) {
@@ -170,15 +172,18 @@ export class DevboxOrchestrator {
     }
 
     const id = randomUUID();
-    let box: Box;
+    let box: InternalBox;
     try {
       box = this.boxes.create({
         id,
         name: input.name,
         image: this.runtimeImage,
         status: 'creating',
+        containerId: null,
         networkName: networkName(id),
-        volumeName: volumeName(id)
+        volumeName: volumeName(id),
+        tailnetUrl: null,
+        tailnetDeviceId: null
       });
     } catch (error) {
       if (isBoxNameConstraintError(error)) {
@@ -199,71 +204,69 @@ export class DevboxOrchestrator {
 
     this.jobRunner.enqueue(job.id, async (ctx) => {
       try {
-        ctx.setProgress(5, 'Creating network');
-        await this.runtime.createNetwork(box.networkName, managedLabels(box.id));
+        ctx.setProgress(10, 'Creating network');
+        await this.runtime.createNetwork(box.networkName, this.labels(box.id, 'network'));
 
-        ctx.setProgress(15, 'Creating volume');
-        await this.runtime.createVolume(box.volumeName, managedLabels(box.id));
+        ctx.setProgress(20, 'Creating workspace volume');
+        await this.runtime.createVolume(box.volumeName, this.labels(box.id, 'volume'));
 
-        // Mint Tailscale auth key if configured
-        let tailscaleEnv: Record<string, string> = {};
-        let tailnetHostname: string | undefined;
-        if (tailnetConfig && this.tailscaleClient) {
-          ctx.setProgress(25, 'Minting Tailscale auth key');
-          const authKey = await this.tailscaleClient.mintAuthKey(tailnetConfig);
-          const shortId = box.id.slice(0, 8);
-          tailnetHostname = `${tailnetConfig.hostnamePrefix}-${box.name}-${shortId}`;
-          tailscaleEnv = {
-            DEVBOX_TAILSCALE_AUTHKEY: authKey.key,
-            DEVBOX_TAILSCALE_HOSTNAME: tailnetHostname
-          };
-        }
+        ctx.setProgress(30, 'Minting Tailscale auth key');
+        const authKey = await this.tailscaleClient!.mintAuthKey(tailnetConfig!);
+        const shortId = box.id.slice(0, 8);
+        const tailnetHostname = `${tailnetConfig!.hostnamePrefix}-${box.name}-${shortId}`;
 
-        ctx.setProgress(40, 'Creating container');
-        const containerEnv = { ...(input.env ?? {}), ...tailscaleEnv, ...this.runtimeEnv };
+        ctx.setProgress(45, 'Creating workspace container');
         const containerId = await this.runtime.createContainer({
           name: containerName(box.id),
           image: box.image,
-          networkName: box.networkName,
-          volumeName: box.volumeName,
-          labels: managedLabels(box.id),
-          env: containerEnv,
+          networkMode: box.networkName,
+          labels: this.labels(box.id, 'container'),
+          env: {
+            ...(input.env ?? {}),
+            DEVBOX_TAILSCALE_AUTHKEY: authKey.key,
+            DEVBOX_TAILSCALE_HOSTNAME: tailnetHostname,
+            ...this.runtimeEnv
+          },
           command: input.command,
-          devices: tailnetConfig
-            ? [{ PathOnHost: '/dev/net/tun', PathInContainer: '/dev/net/tun', CgroupPermissions: 'rwm' }]
-            : undefined,
-          capAdd: tailnetConfig ? ['NET_ADMIN', 'NET_RAW'] : undefined
+          mounts: [
+            {
+              Type: 'volume',
+              Source: box.volumeName,
+              Target: '/workspace'
+            }
+          ],
+          devices: [
+            {
+              PathOnHost: '/dev/net/tun',
+              PathInContainer: '/dev/net/tun',
+              CgroupPermissions: 'rwm'
+            }
+          ],
+          capAdd: ['NET_ADMIN', 'NET_RAW']
         });
 
-        const creating = this.boxes.update(box.id, {
+        box = this.boxes.update(box.id, {
           containerId,
-          status: 'creating',
-          tailnetUrl: tailnetHostname ? `ssh://${tailnetHostname}` : null
+          tailnetUrl: `ssh://${tailnetHostname}`
         });
-        this.publishBox(creating);
+        this.publishBox(box);
 
-        ctx.setProgress(60, 'Starting container');
+        ctx.setProgress(65, 'Starting workspace container');
         await this.runtime.startContainer(containerId);
 
-        // Capture Tailscale device identity from control plane.
-        if (tailnetConfig && this.tailscaleClient) {
-          if (!tailnetHostname) {
-            throw new ValidationError('Missing tailnet hostname for device capture.');
-          }
-          ctx.setProgress(75, 'Waiting for Tailscale device registration');
-          const device = await this.captureDeviceByHostname(tailnetConfig, tailnetHostname);
-          if (!device) {
-            throw new ValidationError(
-              `Timed out waiting for Tailscale device registration for hostname ${tailnetHostname}.`
-            );
-          }
-          this.boxes.update(box.id, { tailnetDeviceId: device.id });
+        ctx.setProgress(85, 'Waiting for Tailscale device registration');
+        const device = await this.captureDeviceByHostname(tailnetConfig!, tailnetHostname);
+        if (!device) {
+          throw new ValidationError(
+            `Timed out waiting for Tailscale device registration for hostname ${tailnetHostname}.`
+          );
         }
 
-        const running = this.boxes.update(box.id, {
+        box = this.boxes.update(box.id, {
+          tailnetDeviceId: device.id,
           status: 'running'
         });
-        this.publishBox(running);
+        this.publishBox(box);
       } catch (error) {
         const latestBox = this.boxes.get(box.id) ?? box;
         const cleanup = await this.cleanupBoxResources(latestBox, { stopContainer: true });
@@ -280,7 +283,7 @@ export class DevboxOrchestrator {
       }
     });
 
-    return { box, job };
+    return { box: toPublicBox(box), job };
   }
 
   async listBoxes(): Promise<Box[]> {
@@ -320,19 +323,26 @@ export class DevboxOrchestrator {
 
     this.jobRunner.enqueue(job.id, async (ctx) => {
       try {
-        ctx.setProgress(50, 'Starting container');
+        ctx.setProgress(40, 'Starting workspace container');
         await this.assertManagedContainer(box.id, containerId);
         await this.runtime.startContainer(containerId);
 
-        // Refresh Tailscale device identity after restart.
-        if (this.tailnetConfigs?.get() && this.tailscaleClient) {
-          ctx.setProgress(75, 'Verifying stored Tailscale device identity');
-          if (!box.tailnetDeviceId) {
-            throw new ValidationError('Box is missing stored tailnet device ID.');
-          }
+        const tailnetConfig = this.tailnetConfigs?.get() ?? null;
+        const hostname = this.tailnetHostname(box);
+        if (!tailnetConfig || !this.tailscaleClient || !hostname) {
+          throw new ValidationError('Box is missing tailnet configuration needed for restart verification.');
         }
 
-        const running = this.boxes.update(box.id, { status: 'running' });
+        ctx.setProgress(80, 'Verifying Tailscale device registration');
+        const device = await this.captureDeviceByHostname(tailnetConfig, hostname);
+        if (!device) {
+          throw new ValidationError(`Timed out waiting for Tailscale device registration for hostname ${hostname}.`);
+        }
+
+        const running = this.boxes.update(box.id, {
+          status: 'running',
+          tailnetDeviceId: device.id
+        });
         this.publishBox(running);
       } catch (error) {
         this.markBoxError(box.id);
@@ -361,7 +371,7 @@ export class DevboxOrchestrator {
     this.jobRunner.enqueue(job.id, async (ctx) => {
       try {
         if (box.containerId) {
-          ctx.setProgress(50, 'Stopping container');
+          ctx.setProgress(50, 'Stopping workspace container');
           await this.assertManagedContainer(box.id, box.containerId);
           await this.runtime.stopContainer(box.containerId);
         }
@@ -434,31 +444,43 @@ export class DevboxOrchestrator {
     return this.streamManagedBoxLogs(box.id, box.containerId, options);
   }
 
-  // --- Private helpers ---
+  private labels(
+    boxId: string,
+    kind: 'container' | 'volume' | 'network'
+  ): Record<string, string> {
+    return managedLabels({ boxId, kind });
+  }
 
   private async captureDeviceByHostname(
     tailnetConfig: TailnetConfig,
     hostname: string
   ): Promise<TailscaleDevice | null> {
-    for (let attempt = 0; attempt <= DEVICE_CAPTURE_RETRY_DELAYS.length; attempt++) {
+    for (let attempt = 0; attempt <= this.deviceCaptureRetryDelays.length; attempt++) {
       try {
         const device = await this.tailscaleClient?.findDeviceByHostname(tailnetConfig, hostname);
         if (device) {
           return device;
         }
       } catch {
-        // Retry on next iteration
+        // Retry on next iteration.
       }
 
-      if (attempt === DEVICE_CAPTURE_RETRY_DELAYS.length) {
+      if (attempt === this.deviceCaptureRetryDelays.length) {
         break;
       }
-      await new Promise((resolve) => setTimeout(resolve, DEVICE_CAPTURE_RETRY_DELAYS[attempt]));
+      await new Promise((resolve) => setTimeout(resolve, this.deviceCaptureRetryDelays[attempt]));
     }
     return null;
   }
 
-  private async cleanupTailnetDevice(box: Box): Promise<void> {
+  private tailnetHostname(box: InternalBox): string | null {
+    if (!box.tailnetUrl?.startsWith('ssh://')) {
+      return null;
+    }
+    return box.tailnetUrl.slice('ssh://'.length);
+  }
+
+  private async cleanupTailnetDevice(box: InternalBox): Promise<void> {
     const tailnetConfig = this.tailnetConfigs?.get() ?? null;
     if (!tailnetConfig || !this.tailscaleClient) {
       return;
@@ -466,12 +488,14 @@ export class DevboxOrchestrator {
 
     let deviceId = box.tailnetDeviceId;
     let cleanupPath = deviceId ? `deviceId:${deviceId}` : null;
-    if (!deviceId && box.tailnetUrl?.startsWith('ssh://')) {
-      const hostname = box.tailnetUrl.slice('ssh://'.length);
-      const device = await this.tailscaleClient.findDeviceByHostname(tailnetConfig, hostname);
-      if (device) {
-        deviceId = device.id;
-        cleanupPath = `hostname:${hostname}`;
+    if (!deviceId) {
+      const hostname = this.tailnetHostname(box);
+      if (hostname) {
+        const device = await this.tailscaleClient.findDeviceByHostname(tailnetConfig, hostname);
+        if (device) {
+          deviceId = device.id;
+          cleanupPath = `hostname:${hostname}`;
+        }
       }
     }
 
@@ -483,7 +507,6 @@ export class DevboxOrchestrator {
     try {
       await this.tailscaleClient.deleteDevice(tailnetConfig, deviceId);
     } catch (error) {
-      // Tailnet cleanup failure is a warning, not a fatal error.
       const message = error instanceof Error ? error.message : String(error);
       console.warn(
         `[orchestrator] tailnet cleanup failed for box ${box.id} (${cleanupPath}): ${message}`
@@ -491,7 +514,7 @@ export class DevboxOrchestrator {
     }
   }
 
-  private async runCleanupJob(box: Box, message = 'Cleanup after external deletion'): Promise<void> {
+  private async runCleanupJob(box: InternalBox, message = 'Cleanup after external deletion'): Promise<void> {
     if (this.cleanupInProgress.has(box.id)) {
       return;
     }
@@ -542,7 +565,7 @@ export class DevboxOrchestrator {
     }
   }
 
-  private mapContainerStateToBoxStatus(status: ContainerRuntimeStatus): Box['status'] {
+  private mapContainerStateToBoxStatus(status: ContainerRuntimeStatus): 'running' | 'stopped' | 'error' {
     switch (status) {
       case 'running':
       case 'restarting':
@@ -647,27 +670,22 @@ export class DevboxOrchestrator {
     });
   }
 
-  private async reconcileBoxForRead(box: Box): Promise<Box | null> {
-    return this.reconcileBox(box, false, false);
+  private async reconcileBoxForRead(box: InternalBox): Promise<Box | null> {
+    const reconciled = await this.reconcileBox(box, false, false);
+    return reconciled ? toPublicBox(reconciled) : null;
   }
 
   private async reconcileBox(
-    box: Box,
+    box: InternalBox,
     emitUpdate: boolean,
     allowErrorRecovery: boolean
-  ): Promise<Box | null> {
+  ): Promise<InternalBox | null> {
     if (!STABLE_RECONCILE_STATUSES.has(box.status)) {
       return box;
     }
 
     if (!box.containerId) {
-      if (box.status === 'stopped' || box.status === 'error') {
-        return box;
-      }
-      const result = this.updateBoxIfChanged(box.id, {
-        status: 'error',
-        containerId: null
-      });
+      const result = this.updateBoxIfChanged(box.id, { status: 'error' });
       if (emitUpdate && result.changed && result.box) {
         this.publishBox(result.box);
       }
@@ -678,30 +696,18 @@ export class DevboxOrchestrator {
     try {
       details = await this.runtime.inspectContainer(box.containerId);
     } catch {
-      // Read paths must stay available if runtime inspect transiently fails.
       return box;
     }
 
     if (!details) {
-      // Container externally deleted - enqueue cleanup job instead of hard delete
-      if (emitUpdate && this.tailnetConfigs) {
-        await this.runCleanupJob(box);
-        return box;
-      }
-      this.boxes.delete(box.id);
-      if (emitUpdate) {
-        this.publishBoxRemoved(box.id);
-      }
-      return null;
+      await this.runCleanupJob(box);
+      return box;
     }
 
     try {
-      assertManaged(details.labels, box.id);
+      assertManaged(details.labels, { boxId: box.id, kind: 'container' });
     } catch {
-      const result = this.updateBoxIfChanged(box.id, {
-        status: 'error',
-        containerId: box.containerId
-      });
+      const result = this.updateBoxIfChanged(box.id, { status: 'error' });
       if (emitUpdate && result.changed && result.box) {
         this.publishBox(result.box);
       }
@@ -712,10 +718,8 @@ export class DevboxOrchestrator {
       return box;
     }
 
-    const result = this.updateBoxIfChanged(box.id, {
-      status: this.mapContainerStateToBoxStatus(details.status),
-      containerId: box.containerId
-    });
+    const nextStatus = this.mapContainerStateToBoxStatus(details.status);
+    const result = this.updateBoxIfChanged(box.id, { status: nextStatus });
     if (emitUpdate && result.changed && result.box) {
       this.publishBox(result.box);
     }
@@ -725,10 +729,10 @@ export class DevboxOrchestrator {
   private updateBoxIfChanged(
     boxId: string,
     patch: {
-      status?: Box['status'];
+      status?: InternalBox['status'];
       containerId?: string | null;
     }
-  ): { box: Box | null; changed: boolean } {
+  ): { box: InternalBox | null; changed: boolean } {
     const current = this.boxes.get(boxId);
     if (!current) {
       return { box: null, changed: false };
@@ -759,7 +763,7 @@ export class DevboxOrchestrator {
     this.publishBox(errorBox);
   }
 
-  private requireBox(boxId: string): Box {
+  private requireBox(boxId: string): InternalBox {
     const box = this.boxes.get(boxId);
     if (!box) {
       throw new NotFoundError(`Box not found: ${boxId}`);
@@ -774,16 +778,16 @@ export class DevboxOrchestrator {
     }
 
     try {
-      assertManaged(details.labels, boxId);
+      assertManaged(details.labels, { boxId, kind: 'container' });
     } catch {
       throw new SecurityError('Refusing operation on unmanaged container.');
     }
   }
 
-  private publishBox(box: Box): void {
+  private publishBox(box: InternalBox): void {
     this.events.emit('box.updated', {
       type: 'box.updated',
-      box
+      box: toPublicBox(box)
     });
   }
 
@@ -795,7 +799,7 @@ export class DevboxOrchestrator {
   }
 
   private async cleanupBoxResources(
-    box: Box,
+    box: InternalBox,
     options: { stopContainer: boolean }
   ): Promise<CleanupBoxResourcesResult> {
     const errors: string[] = [];

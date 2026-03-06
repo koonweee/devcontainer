@@ -190,7 +190,7 @@ describe('API routes', () => {
     const created = createRes.json() as { box: { id: string }; job: { id: string } };
     await waitForTerminalJob(app, created.job.id);
 
-    const createdBox = await harness.orchestrator.getBox(created.box.id);
+    const createdBox = harness.boxes.get(created.box.id);
     if (!createdBox?.containerId) {
       throw new Error('Expected container id for reconciliation route test');
     }
@@ -300,7 +300,7 @@ describe('API routes', () => {
     const created = createRes.json() as { box: { id: string }; job: { id: string } };
     await waitForTerminalJob(app, created.job.id);
 
-    const box = await harness.orchestrator.getBox(created.box.id);
+    const box = harness.boxes.get(created.box.id);
     if (!box?.containerId) {
       throw new Error('Expected container id for runtime monitor SSE test');
     }
@@ -319,7 +319,8 @@ describe('API routes', () => {
       labels: {
         'com.devbox.managed': 'true',
         'com.devbox.box_id': box.id,
-        'com.devbox.owner': 'orchestrator'
+        'com.devbox.owner': 'orchestrator',
+        'com.devbox.kind': 'container'
       },
       timestamp: new Date().toISOString()
     });
@@ -488,7 +489,7 @@ describe('API routes', () => {
     const created = createRes.json() as { box: { id: string }; job: { id: string } };
     await waitForTerminalJob(app, created.job.id);
 
-    const box = await harness.orchestrator.getBox(created.box.id);
+    const box = harness.boxes.get(created.box.id);
     if (!box?.containerId) {
       throw new Error('Expected container id for tail query test');
     }
@@ -522,7 +523,7 @@ describe('API routes', () => {
     });
     const created = createRes.json() as { box: { id: string }; job: { id: string } };
     await waitForTerminalJob(app, created.job.id);
-    const box = await harness.orchestrator.getBox(created.box.id);
+    const box = harness.boxes.get(created.box.id);
     if (!box?.containerId) {
       throw new Error('Expected container id for abort test');
     }
@@ -601,7 +602,7 @@ describe('API routes', () => {
     const created = createRes.json() as { box: { id: string }; job: { id: string } };
     await waitForTerminalJob(app, created.job.id);
 
-    const box = await harness.orchestrator.getBox(created.box.id);
+    const box = harness.boxes.get(created.box.id);
     if (!box?.containerId) {
       throw new Error('Expected container id for unmanaged logs test');
     }

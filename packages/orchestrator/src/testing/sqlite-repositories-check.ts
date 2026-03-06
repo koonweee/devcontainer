@@ -7,8 +7,10 @@ import { JobRunner } from '../job-runner.js';
 import { DevboxOrchestrator } from '../orchestrator.js';
 import { createSqliteRepositories } from '../repositories.js';
 import { MockDockerRuntime } from './mock-runtime.js';
+import { InMemoryTailnetConfigRepository } from './in-memory-repositories.js';
+import { MockTailscaleClient } from './mock-tailscale-client.js';
 
-type Mode = 'reuse' | 'migration';
+type Mode = 'reuse' | 'schema';
 
 async function waitForJob(
   orchestrator: DevboxOrchestrator,
@@ -35,12 +37,24 @@ async function runReuseCheck(): Promise<void> {
   const events = new OrchestratorEvents();
   const runner = new JobRunner(repositories.jobs, events);
   const runtime = new MockDockerRuntime();
+  const tailnetConfig = new InMemoryTailnetConfigRepository();
+  tailnetConfig.set({
+    tailnet: 'example.com',
+    oauthClientId: 'client-id',
+    oauthClientSecret: 'client-secret'
+  });
+  const tailscaleClient = new MockTailscaleClient();
   const orchestrator = new DevboxOrchestrator(
     runtime,
     repositories.boxes,
     repositories.jobs,
     runner,
-    events
+    events,
+    undefined,
+    {},
+    tailnetConfig,
+    tailscaleClient,
+    [1, 1, 1]
   );
 
   try {
@@ -72,115 +86,24 @@ async function runReuseCheck(): Promise<void> {
   }
 }
 
-function runMigrationCheck(): void {
-  const tempDir = mkdtempSync(path.join(tmpdir(), 'devbox-migration-'));
+function runSchemaCheck(): void {
+  const tempDir = mkdtempSync(path.join(tmpdir(), 'devbox-schema-'));
   const dbPath = path.join(tempDir, 'devbox.sqlite');
-  const legacyRepositories = createSqliteRepositories(dbPath);
-  const timestamp = new Date().toISOString();
-
-  legacyRepositories.db.exec('DROP INDEX IF EXISTS boxes_name_unique');
-  legacyRepositories.db.exec('DROP TABLE IF EXISTS boxes');
-  legacyRepositories.db.exec(`
-    CREATE TABLE boxes (
-      id TEXT PRIMARY KEY,
-      name TEXT UNIQUE NOT NULL,
-      image TEXT NOT NULL,
-      status TEXT NOT NULL,
-      container_id TEXT,
-      network_name TEXT NOT NULL,
-      volume_name TEXT NOT NULL,
-      tailnet_url TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      deleted_at TEXT
-    );
-  `);
-
-  legacyRepositories.db
-    .prepare(
-      `
-      INSERT INTO boxes (
-        id,
-        name,
-        image,
-        status,
-        container_id,
-        network_name,
-        volume_name,
-        tailnet_url,
-        created_at,
-        updated_at,
-        deleted_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `
-    )
-    .run(
-      'legacy-id',
-      'legacy-box',
-      'debian:trixie-slim',
-      'stopped',
-      null,
-      'legacy-net',
-      'legacy-vol',
-      null,
-      timestamp,
-      timestamp,
-      timestamp
-    );
-  legacyRepositories.db.close();
-
   const repositories = createSqliteRepositories(dbPath);
+
   try {
     const tableSqlRow = repositories.db
       .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'boxes'")
       .get() as { sql?: string } | undefined;
     const tableSql = tableSqlRow?.sql ?? '';
-    if (tableSql.includes('deleted_at')) {
-      throw new Error('legacy deleted_at column still exists after reset');
+    if (!tableSql.includes('container_id TEXT')) {
+      throw new Error('expected single-container schema to include container_id');
     }
-
-    const legacyCount = repositories.db.prepare('SELECT COUNT(*) AS count FROM boxes').get() as
-      | { count?: number }
-      | undefined;
-    if ((legacyCount?.count ?? 0) !== 0) {
-      throw new Error('expected destructive reset to remove legacy box rows');
+    if (!tableSql.includes('volume_name TEXT')) {
+      throw new Error('expected single-container schema to include volume_name');
     }
-
-    const indexSqlRow = repositories.db
-      .prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'boxes_name_unique'")
-      .get() as { sql?: string } | undefined;
-    const indexSql = indexSqlRow?.sql ?? '';
-    if (!indexSql.includes('ON boxes(name)')) {
-      throw new Error('global name unique index was not created');
-    }
-    if (indexSql.includes('deleted_at')) {
-      throw new Error('legacy partial unique index filter should not be present');
-    }
-
-    repositories.boxes.create({
-      name: 'legacy-box',
-      image: 'debian:trixie-slim',
-      status: 'creating',
-      networkName: 'legacy-net-2',
-      volumeName: 'legacy-vol-2'
-    });
-
-    let duplicateAllowed = false;
-    try {
-      repositories.boxes.create({
-        name: 'legacy-box',
-        image: 'debian:trixie-slim',
-        status: 'creating',
-        networkName: 'legacy-net-3',
-        volumeName: 'legacy-vol-3'
-      });
-      duplicateAllowed = true;
-    } catch {
-      // Expected.
-    }
-    if (duplicateAllowed) {
-      throw new Error('global name uniqueness did not reject duplicate name');
+    if (tableSql.includes('workspace_container_id') || tableSql.includes('tailscale_container_id')) {
+      throw new Error('grouped runtime schema should not exist');
     }
   } finally {
     repositories.db.close();
@@ -195,8 +118,8 @@ async function main(): Promise<void> {
     console.log('ok');
     return;
   }
-  if (mode === 'migration') {
-    runMigrationCheck();
+  if (mode === 'schema') {
+    runSchemaCheck();
     console.log('ok');
     return;
   }

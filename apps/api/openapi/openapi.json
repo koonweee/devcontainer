@@ -13,11 +13,7 @@
           "name",
           "image",
           "status",
-          "containerId",
-          "networkName",
-          "volumeName",
           "tailnetUrl",
-          "tailnetDeviceId",
           "createdAt",
           "updatedAt"
         ],
@@ -77,33 +73,7 @@
               }
             ]
           },
-          "containerId": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "networkName": {
-            "type": "string"
-          },
-          "volumeName": {
-            "type": "string"
-          },
           "tailnetUrl": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "tailnetDeviceId": {
             "anyOf": [
               {
                 "type": "string"

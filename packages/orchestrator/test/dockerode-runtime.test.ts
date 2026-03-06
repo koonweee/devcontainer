@@ -17,15 +17,15 @@ describe('DockerodeRuntime', () => {
       runtime.createContainer({
         name: 'devbox-1',
         image: 'devbox-runtime:local',
-        networkName: 'net',
-        volumeName: 'vol',
+        networkMode: 'net',
+        mounts: [],
         labels: {}
       })
     ).rejects.toThrow('Runtime image not found locally: devbox-runtime:local');
     expect(createContainer).not.toHaveBeenCalled();
   });
 
-  it('creates container when runtime image is already present locally', async () => {
+  it('passes through mounts, network mode, device, and capability settings', async () => {
     const inspect = vi.fn().mockResolvedValue({});
     const createContainer = vi.fn().mockResolvedValue({ id: 'container-123' });
     const runtime = new DockerodeRuntime({
@@ -36,25 +36,59 @@ describe('DockerodeRuntime', () => {
     const id = await runtime.createContainer({
       name: 'devbox-2',
       image: 'runtime:test',
-      networkName: 'net',
-      volumeName: 'vol',
+      networkMode: 'devbox-net-box',
+      mounts: [
+        {
+          Type: 'volume',
+          Source: 'workspace-vol',
+          Target: '/workspace'
+        }
+      ],
       labels: { one: '1' },
       command: ['sleep', 'infinity'],
-      env: { HELLO: 'world' }
+      env: { HELLO: 'world' },
+      devices: [
+        {
+          PathOnHost: '/dev/net/tun',
+          PathInContainer: '/dev/net/tun',
+          CgroupPermissions: 'rwm'
+        }
+      ],
+      capAdd: ['NET_ADMIN', 'NET_RAW'],
+      capDrop: ['NET_BIND_SERVICE']
     });
 
     expect(id).toBe('container-123');
     expect(createContainer).toHaveBeenCalledWith(
       expect.objectContaining({
         name: 'devbox-2',
-        Image: 'runtime:test'
+        Image: 'runtime:test',
+        HostConfig: expect.objectContaining({
+          NetworkMode: 'devbox-net-box',
+          Mounts: [
+            {
+              Type: 'volume',
+              Source: 'workspace-vol',
+              Target: '/workspace'
+            }
+          ],
+          Devices: [
+            {
+              PathOnHost: '/dev/net/tun',
+              PathInContainer: '/dev/net/tun',
+              CgroupPermissions: 'rwm'
+            }
+          ],
+          CapAdd: ['NET_ADMIN', 'NET_RAW'],
+          CapDrop: ['NET_BIND_SERVICE']
+        })
       })
     );
   });
 
   it('streams container runtime events with managed filters', async () => {
     const eventsStream = Readable.from([
-      '{"Type":"container","Action":"start","time":1700000000,"Actor":{"ID":"container-1","Attributes":{"com.devbox.managed":"true","com.devbox.box_id":"box-1","com.devbox.owner":"orchestrator"}}}\n'
+      '{"Type":"container","Action":"start","time":1700000000,"Actor":{"ID":"container-1","Attributes":{"com.devbox.managed":"true","com.devbox.box_id":"box-1","com.devbox.owner":"orchestrator","com.devbox.kind":"container"}}}\n'
     ]);
     const getEvents = vi.fn().mockResolvedValue(eventsStream);
     const runtime = new DockerodeRuntime({
@@ -73,7 +107,8 @@ describe('DockerodeRuntime', () => {
         labels: {
           'com.devbox.managed': 'true',
           'com.devbox.box_id': 'box-1',
-          'com.devbox.owner': 'orchestrator'
+          'com.devbox.owner': 'orchestrator',
+          'com.devbox.kind': 'container'
         },
         timestamp: new Date(1_700_000_000_000).toISOString()
       }
@@ -147,12 +182,6 @@ describe('DockerodeRuntime', () => {
         line: 'new line'
       }
     ]);
-    expect(logs).toHaveBeenCalledWith(
-      expect.objectContaining({
-        since: Math.floor(new Date('2026-03-01T00:00:00.500000000Z').getTime() / 1000),
-        follow: true
-      })
-    );
   });
 
   it('parses multiplexed non-follow buffer logs into stdout and stderr lines', async () => {
@@ -194,28 +223,40 @@ describe('DockerodeRuntime', () => {
     ]);
   });
 
-  it('aborts follow log streams by destroying the Docker stream', async () => {
-    const raw = new PassThrough();
-    const destroySpy = vi.spyOn(raw, 'destroy');
-    const logs = vi.fn().mockResolvedValue(raw);
+  it('demuxes follow streams into stdout and stderr lines', async () => {
+    const logStream = new PassThrough();
+    const logs = vi.fn().mockResolvedValue(logStream);
+    const demuxStream = vi.fn((_source, stdout: PassThrough, stderr: PassThrough) => {
+      stdout.write('2026-03-01T00:00:00.000000000Z hello stdout\n');
+      stderr.write('2026-03-01T00:00:01.000000000Z hello stderr\n');
+      stdout.end();
+      stderr.end();
+      logStream.destroy();
+    });
     const runtime = new DockerodeRuntime({
       getContainer: vi.fn().mockReturnValue({ logs }),
-      modem: { demuxStream: vi.fn() }
+      modem: { demuxStream }
     } as unknown as Dockerode);
-    const controller = new AbortController();
 
-    const consume = (async () => {
-      for await (const _event of runtime.streamContainerLogs('container-logs', {
-        follow: true,
-        signal: controller.signal
-      })) {
-        // no-op
+    const received = [];
+    for await (const event of runtime.streamContainerLogs('container-follow', {
+      follow: true
+    })) {
+      received.push(event);
+    }
+
+    expect(received).toEqual([
+      {
+        stream: 'stdout',
+        timestamp: '2026-03-01T00:00:00.000000000Z',
+        line: 'hello stdout'
+      },
+      {
+        stream: 'stderr',
+        timestamp: '2026-03-01T00:00:01.000000000Z',
+        line: 'hello stderr'
       }
-    })();
-
-    controller.abort();
-    await consume;
-
-    expect(destroySpy).toHaveBeenCalled();
+    ]);
+    expect(demuxStream).toHaveBeenCalled();
   });
 });

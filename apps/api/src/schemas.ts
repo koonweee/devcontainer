@@ -14,11 +14,7 @@ export const BoxSchema = Type.Object(
       Type.Literal('removing'),
       Type.Literal('error')
     ]),
-    containerId: Type.Union([Type.String(), Type.Null()]),
-    networkName: Type.String(),
-    volumeName: Type.String(),
     tailnetUrl: Type.Union([Type.String(), Type.Null()]),
-    tailnetDeviceId: Type.Union([Type.String(), Type.Null()]),
     createdAt: Type.String(),
     updatedAt: Type.String()
   },

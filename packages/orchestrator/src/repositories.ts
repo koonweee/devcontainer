@@ -1,13 +1,21 @@
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 
-import type { Box, Job, JobFilter, JobStatus, JobType, TailnetConfig, TailnetConfigInput } from './types.js';
+import type {
+  InternalBox,
+  Job,
+  JobFilter,
+  JobStatus,
+  JobType,
+  TailnetConfig,
+  TailnetConfigInput
+} from './types.js';
 
 export interface BoxCreate {
   id?: string;
   name: string;
   image: string;
-  status: Box['status'];
+  status: InternalBox['status'];
   containerId?: string | null;
   networkName: string;
   volumeName: string;
@@ -26,11 +34,11 @@ export interface JobCreate {
 }
 
 export interface BoxRepository {
-  create(input: BoxCreate): Box;
-  update(boxId: string, patch: Partial<Omit<Box, 'id' | 'createdAt'>>): Box;
-  list(): Box[];
-  get(boxId: string): Box | null;
-  getByName(name: string): Box | null;
+  create(input: BoxCreate): InternalBox;
+  update(boxId: string, patch: Partial<Omit<InternalBox, 'id' | 'createdAt'>>): InternalBox;
+  list(): InternalBox[];
+  get(boxId: string): InternalBox | null;
+  getByName(name: string): InternalBox | null;
   delete(boxId: string): void;
   count(): number;
 }
@@ -52,12 +60,12 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-function mapBox(row: Record<string, unknown>): Box {
+function mapBox(row: Record<string, unknown>): InternalBox {
   return {
     id: String(row.id),
     name: String(row.name),
     image: String(row.image),
-    status: row.status as Box['status'],
+    status: row.status as InternalBox['status'],
     containerId: (row.container_id as string | null) ?? null,
     networkName: String(row.network_name),
     volumeName: String(row.volume_name),
@@ -150,52 +158,9 @@ const CREATE_NAME_UNIQUE_INDEX_SQL = `
   ON boxes(name);
 `;
 
-function hasBoxesTable(db: DatabaseSync): boolean {
-  const row = db
-    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'boxes'")
-    .get() as { 1?: number } | undefined;
-  return row !== undefined;
-}
-
-function hasDeletedAtColumn(db: DatabaseSync): boolean {
-  if (!hasBoxesTable(db)) {
-    return false;
-  }
-
-  const columns = db.prepare("PRAGMA table_info('boxes')").all() as Array<{ name?: unknown }>;
-  return columns.some((column) => column.name === 'deleted_at');
-}
-
-function hasColumn(db: DatabaseSync, table: string, column: string): boolean {
-  const columns = db.prepare(`PRAGMA table_info('${table}')`).all() as Array<{ name?: unknown }>;
-  return columns.some((c) => c.name === column);
-}
-
-function resetBoxesTableForHardDeletes(db: DatabaseSync): void {
-  db.exec('BEGIN');
-  try {
-    db.exec('DROP TABLE IF EXISTS boxes');
-    db.exec(CREATE_BOXES_TABLE_SQL);
-    db.exec('COMMIT');
-  } catch (error) {
-    db.exec('ROLLBACK');
-    throw error;
-  }
-}
-
 export function initializeSchema(db: DatabaseSync): void {
+  db.exec(CREATE_BOXES_TABLE_SQL);
   db.exec(CREATE_JOBS_TABLE_SQL);
-
-  if (hasDeletedAtColumn(db)) {
-    resetBoxesTableForHardDeletes(db);
-  } else {
-    db.exec(CREATE_BOXES_TABLE_SQL);
-  }
-
-  if (hasBoxesTable(db) && !hasColumn(db, 'boxes', 'tailnet_device_id')) {
-    db.exec('ALTER TABLE boxes ADD COLUMN tailnet_device_id TEXT');
-  }
-
   db.exec(CREATE_NAME_UNIQUE_INDEX_SQL);
   db.exec(CREATE_TAILNET_CONFIG_TABLE_SQL);
 }
@@ -204,7 +169,7 @@ export function initializeSchema(db: DatabaseSync): void {
 export class SqliteBoxRepository implements BoxRepository {
   constructor(private readonly db: DatabaseSync) {}
 
-  create(input: BoxCreate): Box {
+  create(input: BoxCreate): InternalBox {
     const id = input.id ?? randomUUID();
     const timestamp = nowIso();
     this.db
@@ -231,9 +196,9 @@ export class SqliteBoxRepository implements BoxRepository {
     return this.getRequired(id);
   }
 
-  update(boxId: string, patch: Partial<Omit<Box, 'id' | 'createdAt'>>): Box {
+  update(boxId: string, patch: Partial<Omit<InternalBox, 'id' | 'createdAt'>>): InternalBox {
     const current = this.getRequired(boxId);
-    const updated: Box = {
+    const updated: InternalBox = {
       ...current,
       ...patch,
       updatedAt: nowIso()
@@ -263,7 +228,7 @@ export class SqliteBoxRepository implements BoxRepository {
     return this.getRequired(boxId);
   }
 
-  list(): Box[] {
+  list(): InternalBox[] {
     const rows = this.db.prepare('SELECT * FROM boxes ORDER BY created_at DESC').all() as Record<
       string,
       unknown
@@ -271,14 +236,14 @@ export class SqliteBoxRepository implements BoxRepository {
     return rows.map(mapBox);
   }
 
-  get(boxId: string): Box | null {
+  get(boxId: string): InternalBox | null {
     const row = this.db.prepare('SELECT * FROM boxes WHERE id = ?').get(boxId) as
       | Record<string, unknown>
       | undefined;
     return row ? mapBox(row) : null;
   }
 
-  getByName(name: string): Box | null {
+  getByName(name: string): InternalBox | null {
     const row = this.db.prepare('SELECT * FROM boxes WHERE name = ?').get(name) as
       | Record<string, unknown>
       | undefined;
@@ -294,7 +259,7 @@ export class SqliteBoxRepository implements BoxRepository {
     return Number(row.cnt);
   }
 
-  private getRequired(boxId: string): Box {
+  private getRequired(boxId: string): InternalBox {
     const box = this.get(boxId);
     if (!box) {
       throw new Error(`Box not found: ${boxId}`);
@@ -362,17 +327,9 @@ export class SqliteJobRepository implements JobRepository {
   }
 
   list(filter?: JobFilter): Job[] {
-    if (filter?.boxId) {
-      const rows = this.db
-        .prepare('SELECT * FROM jobs WHERE box_id = ? ORDER BY created_at DESC')
-        .all(filter.boxId) as Record<string, unknown>[];
-      return rows.map(mapJob);
-    }
-
-    const rows = this.db.prepare('SELECT * FROM jobs ORDER BY created_at DESC').all() as Record<
-      string,
-      unknown
-    >[];
+    const rows = filter?.boxId
+      ? (this.db.prepare('SELECT * FROM jobs WHERE box_id = ? ORDER BY created_at DESC').all(filter.boxId) as Record<string, unknown>[])
+      : (this.db.prepare('SELECT * FROM jobs ORDER BY created_at DESC').all() as Record<string, unknown>[]);
     return rows.map(mapJob);
   }
 
@@ -392,7 +349,7 @@ export class SqliteJobRepository implements JobRepository {
   }
 }
 
-/** Persists tailnet credentials in a single-row SQLite table. */
+/** Stores tailnet config in SQLite as a single mutable row. */
 export class SqliteTailnetConfigRepository implements TailnetConfigRepository {
   constructor(private readonly db: DatabaseSync) {}
 
@@ -404,39 +361,49 @@ export class SqliteTailnetConfigRepository implements TailnetConfigRepository {
   }
 
   set(input: TailnetConfigInput): TailnetConfig {
+    const current = this.get();
     const timestamp = nowIso();
-    const existing = this.get();
-    if (existing) {
-      this.db
-        .prepare(
-          `UPDATE tailnet_config SET tailnet = ?, oauth_client_id = ?, oauth_client_secret = ?, tags_csv = ?, hostname_prefix = ?, authkey_expiry_seconds = ?, updated_at = ? WHERE id = 1`
-        )
-        .run(
-          input.tailnet,
-          input.oauthClientId,
-          input.oauthClientSecret,
-          input.tagsCsv ?? 'tag:devcontainer',
-          input.hostnamePrefix ?? 'devbox',
-          input.authkeyExpirySeconds ?? 600,
-          timestamp
-        );
-    } else {
-      this.db
-        .prepare(
-          `INSERT INTO tailnet_config (id, tailnet, oauth_client_id, oauth_client_secret, tags_csv, hostname_prefix, authkey_expiry_seconds, created_at, updated_at) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .run(
-          input.tailnet,
-          input.oauthClientId,
-          input.oauthClientSecret,
-          input.tagsCsv ?? 'tag:devcontainer',
-          input.hostnamePrefix ?? 'devbox',
-          input.authkeyExpirySeconds ?? 600,
-          timestamp,
-          timestamp
-        );
+    this.db
+      .prepare(
+        `
+      INSERT INTO tailnet_config (
+        id,
+        tailnet,
+        oauth_client_id,
+        oauth_client_secret,
+        tags_csv,
+        hostname_prefix,
+        authkey_expiry_seconds,
+        created_at,
+        updated_at
+      )
+      VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        tailnet = excluded.tailnet,
+        oauth_client_id = excluded.oauth_client_id,
+        oauth_client_secret = excluded.oauth_client_secret,
+        tags_csv = excluded.tags_csv,
+        hostname_prefix = excluded.hostname_prefix,
+        authkey_expiry_seconds = excluded.authkey_expiry_seconds,
+        updated_at = excluded.updated_at
+      `
+      )
+      .run(
+        input.tailnet,
+        input.oauthClientId,
+        input.oauthClientSecret,
+        input.tagsCsv ?? current?.tagsCsv ?? 'tag:devcontainer',
+        input.hostnamePrefix ?? current?.hostnamePrefix ?? 'devbox',
+        input.authkeyExpirySeconds ?? current?.authkeyExpirySeconds ?? 600,
+        current?.createdAt ?? timestamp,
+        timestamp
+      );
+
+    const config = this.get();
+    if (!config) {
+      throw new Error('Tailnet config not found after upsert');
     }
-    return this.get()!;
+    return config;
   }
 
   delete(): void {
@@ -451,7 +418,6 @@ export function createSqliteRepositories(dbPath: string): {
   tailnetConfig: SqliteTailnetConfigRepository;
 } {
   const db = new DatabaseSync(dbPath);
-  db.exec('PRAGMA journal_mode = WAL');
   initializeSchema(db);
   return {
     db,

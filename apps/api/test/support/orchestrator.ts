@@ -22,7 +22,6 @@ export function buildInMemoryHarness(): {
   const runtime = new MockDockerRuntime();
   const tailscaleClient = new MockTailscaleClient();
 
-  // Pre-configure tailnet so box creation works in tests
   tailnetConfig.set({
     tailnet: 'test.example.com',
     oauthClientId: 'test-client',
@@ -30,9 +29,15 @@ export function buildInMemoryHarness(): {
   });
 
   const orchestrator = new DevboxOrchestrator(
-    runtime, boxes, jobs, runner, events,
-    undefined, undefined,
-    tailnetConfig, tailscaleClient
+    runtime,
+    boxes,
+    jobs,
+    runner,
+    events,
+    undefined,
+    undefined,
+    tailnetConfig,
+    tailscaleClient
   );
   return { events, jobs, boxes, tailnetConfig, runner, runtime, tailscaleClient, orchestrator };
 }

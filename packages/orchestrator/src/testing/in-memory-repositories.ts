@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import type { Box, Job, JobFilter, TailnetConfig, TailnetConfigInput } from '../types.js';
+import type { InternalBox, Job, JobFilter, TailnetConfig, TailnetConfigInput } from '../types.js';
 import type { BoxCreate, BoxRepository, JobCreate, JobRepository, TailnetConfigRepository } from '../repositories.js';
 
 function now(): string {
@@ -9,12 +9,12 @@ function now(): string {
 
 /** Stores box state in memory for fast tests. */
 export class InMemoryBoxRepository implements BoxRepository {
-  private readonly boxes = new Map<string, Box>();
+  private readonly boxes = new Map<string, InternalBox>();
 
-  create(input: BoxCreate): Box {
+  create(input: BoxCreate): InternalBox {
     const id = input.id ?? randomUUID();
     const timestamp = now();
-    const box: Box = {
+    const box: InternalBox = {
       id,
       name: input.name,
       image: input.image,
@@ -31,12 +31,12 @@ export class InMemoryBoxRepository implements BoxRepository {
     return box;
   }
 
-  update(boxId: string, patch: Partial<Omit<Box, 'id' | 'createdAt'>>): Box {
+  update(boxId: string, patch: Partial<Omit<InternalBox, 'id' | 'createdAt'>>): InternalBox {
     const current = this.get(boxId);
     if (!current) {
       throw new Error(`Box not found: ${boxId}`);
     }
-    const updated: Box = {
+    const updated: InternalBox = {
       ...current,
       ...patch,
       updatedAt: now()
@@ -45,15 +45,15 @@ export class InMemoryBoxRepository implements BoxRepository {
     return updated;
   }
 
-  list(): Box[] {
+  list(): InternalBox[] {
     return [...this.boxes.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
-  get(boxId: string): Box | null {
+  get(boxId: string): InternalBox | null {
     return this.boxes.get(boxId) ?? null;
   }
 
-  getByName(name: string): Box | null {
+  getByName(name: string): InternalBox | null {
     const box = [...this.boxes.values()].find((candidate) => candidate.name === name);
     return box ?? null;
   }

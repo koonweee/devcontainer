@@ -16,13 +16,16 @@ export interface Box {
   name: string;
   image: string;
   status: BoxStatus;
+  tailnetUrl: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface InternalBox extends Box {
   containerId: string | null;
   networkName: string;
   volumeName: string;
-  tailnetUrl: string | null;
   tailnetDeviceId: string | null;
-  createdAt: string;
-  updatedAt: string;
 }
 
 export interface TailnetConfig {
@@ -92,4 +95,25 @@ export interface OrchestratorEventMap {
 export interface CreateBoxResult {
   box: Box;
   job: Job;
+}
+
+export function toPublicBox(box: InternalBox): Box {
+  const {
+    id,
+    name,
+    image,
+    status,
+    tailnetUrl,
+    createdAt,
+    updatedAt
+  } = box;
+  return {
+    id,
+    name,
+    image,
+    status,
+    tailnetUrl,
+    createdAt,
+    updatedAt
+  };
 }
