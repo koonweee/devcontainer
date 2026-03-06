@@ -565,7 +565,7 @@ describe('API routes', () => {
 
   it('returns 404 when requesting logs for a box that failed creation and was compensated', async () => {
     const harness = buildInMemoryHarness();
-    harness.runtime.failOn.createContainer = new Error('create container failed');
+    harness.runtime.failOn.createBoxContainer = new Error('create container failed');
     const app = await buildApp({ orchestrator: harness.orchestrator });
 
     const createRes = await app.inject({
@@ -610,7 +610,7 @@ describe('API routes', () => {
     if (!container) {
       throw new Error('Expected container record for unmanaged logs test');
     }
-    container.labels = {};
+    harness.runtime.updateContainerDetails(box.containerId, { labels: {} });
 
     const response = await app.inject({
       method: 'GET',
@@ -619,6 +619,26 @@ describe('API routes', () => {
 
     expect(response.statusCode).toBe(403);
     expect((response.json() as { message: string }).message).toContain('unmanaged container');
+    await app.close();
+  });
+
+  it('rejects unexpected networking and exposure fields on create payloads', async () => {
+    const app = await buildApp({ orchestrator: buildInMemoryOrchestrator() });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/boxes',
+      payload: {
+        name: 'invalid-extra-fields',
+        ports: [{ containerPort: 8080, hostPort: 3000 }],
+        networkMode: 'host',
+        mounts: ['/var/run/docker.sock:/var/run/docker.sock'],
+        ingress: { enabled: true },
+        sidecars: [{ image: 'cloudflared:latest' }]
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
     await app.close();
   });
 });

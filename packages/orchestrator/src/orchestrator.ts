@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
+import { validateBoxContainerIsolation } from './box-runtime.js';
 import { ConfigLockedError, NotFoundError, SecurityError, SetupRequiredError, ValidationError } from './errors.js';
 import type { OrchestratorEvents } from './events.js';
 import { JobRunner, publishJob } from './job-runner.js';
@@ -214,12 +215,12 @@ export class DevboxOrchestrator {
         const authKey = await this.tailscaleClient!.mintAuthKey(tailnetConfig!);
         const shortId = box.id.slice(0, 8);
         const tailnetHostname = `${tailnetConfig!.hostnamePrefix}-${box.name}-${shortId}`;
-
         ctx.setProgress(45, 'Creating workspace container');
-        const containerId = await this.runtime.createContainer({
+        const containerId = await this.runtime.createBoxContainer({
           name: containerName(box.id),
           image: box.image,
-          networkMode: box.networkName,
+          networkName: box.networkName,
+          volumeName: box.volumeName,
           labels: this.labels(box.id, 'container'),
           env: {
             ...(input.env ?? {}),
@@ -227,22 +228,7 @@ export class DevboxOrchestrator {
             DEVBOX_TAILSCALE_HOSTNAME: tailnetHostname,
             ...this.runtimeEnv
           },
-          command: input.command,
-          mounts: [
-            {
-              Type: 'volume',
-              Source: box.volumeName,
-              Target: '/workspace'
-            }
-          ],
-          devices: [
-            {
-              PathOnHost: '/dev/net/tun',
-              PathInContainer: '/dev/net/tun',
-              CgroupPermissions: 'rwm'
-            }
-          ],
-          capAdd: ['NET_ADMIN', 'NET_RAW']
+          command: input.command
         });
 
         box = this.boxes.update(box.id, {
@@ -714,6 +700,21 @@ export class DevboxOrchestrator {
       return result.box ?? box;
     }
 
+    const isolationViolations = validateBoxContainerIsolation(details, box.networkName);
+    if (isolationViolations.length > 0) {
+      console.warn(
+        `[orchestrator] box ${box.id} container ${box.containerId} violates isolation invariants: ${isolationViolations.join('; ')}`
+      );
+      const result = this.updateBoxIfChanged(box.id, {
+        status: 'error',
+        containerId: box.containerId
+      });
+      if (emitUpdate && result.changed && result.box) {
+        this.publishBox(result.box);
+      }
+      return result.box ?? box;
+    }
+
     if (box.status === 'error' && !allowErrorRecovery) {
       return box;
     }
@@ -781,6 +782,18 @@ export class DevboxOrchestrator {
       assertManaged(details.labels, { boxId, kind: 'container' });
     } catch {
       throw new SecurityError('Refusing operation on unmanaged container.');
+    }
+
+    const box = this.boxes.get(boxId);
+    if (!box) {
+      throw new NotFoundError(`Box not found: ${boxId}`);
+    }
+
+    const isolationViolations = validateBoxContainerIsolation(details, box.networkName);
+    if (isolationViolations.length > 0) {
+      throw new SecurityError(
+        `Refusing operation on container that violates box isolation invariants: ${isolationViolations.join('; ')}`
+      );
     }
   }
 
