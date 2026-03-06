@@ -12,65 +12,25 @@ function makeExecutable(filePath: string, contents: string): void {
   writeFileSync(filePath, contents, { mode: 0o755 });
 }
 
-function prepareWorkspaceEntrypointHarness(): {
+function prepareEntrypointHarness(): {
   root: string;
   scriptPath: string;
   logsDir: string;
-  env: NodeJS.ProcessEnv;
-} {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'devbox-workspace-entrypoint-'));
-  const binDir = path.join(root, 'bin');
-  const logsDir = path.join(root, 'logs');
-  const sshdRunDir = path.join(root, 'run', 'sshd');
-  mkdirSync(binDir, { recursive: true });
-  mkdirSync(logsDir, { recursive: true });
-
-  makeExecutable(path.join(binDir, 'id'), '#!/bin/sh\nexit 0\n');
-  makeExecutable(
-    path.join(binDir, 'sshd'),
-    `#!/bin/sh\necho "$@" >> "${path.join(logsDir, 'sshd.log')}"\nexit 0\n`
-  );
-
-  const source = readFileSync(path.resolve(testDir, '../../../docker/runtime/dev-entrypoint.sh'), 'utf8');
-  const scriptPath = path.join(root, 'dev-entrypoint.sh');
-  const rewritten = source
-    .replace('/var/run/sshd', sshdRunDir)
-    .replace('exec /usr/sbin/sshd -D -e', 'exec sshd -D -e');
-  writeFileSync(scriptPath, rewritten, { mode: 0o755 });
-
-  return {
-    root,
-    scriptPath,
-    logsDir,
-    env: {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH ?? ''}`,
-      DEV_USER: 'dev'
-    }
-  };
-}
-
-function prepareSidecarEntrypointHarness(): {
-  root: string;
-  scriptPath: string;
-  logsDir: string;
+  stateDir: string;
   stateFile: string;
   env: NodeJS.ProcessEnv;
 } {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'devbox-sidecar-entrypoint-'));
+  const root = mkdtempSync(path.join(os.tmpdir(), 'devbox-runtime-entrypoint-'));
   const binDir = path.join(root, 'bin');
   const logsDir = path.join(root, 'logs');
   const runDir = path.join(root, 'run');
-  const stateDir = path.join(root, 'state');
+  const stateDir = path.join(root, 'var-lib-tailscale');
   const stateFile = path.join(stateDir, 'tailscaled.state');
   mkdirSync(binDir, { recursive: true });
   mkdirSync(logsDir, { recursive: true });
   mkdirSync(stateDir, { recursive: true });
 
-  makeExecutable(
-    path.join(binDir, 'iptables'),
-    `#!/bin/sh\necho "$@" >> "${path.join(logsDir, 'iptables.log')}"\nexit 0\n`
-  );
+  makeExecutable(path.join(binDir, 'id'), '#!/bin/sh\nexit 0\n');
   makeExecutable(
     path.join(binDir, 'tailscale'),
     `#!/bin/sh\necho "$@" >> "${path.join(logsDir, 'tailscale.log')}"\nexit 0\n`
@@ -89,8 +49,8 @@ function prepareSidecarEntrypointHarness(): {
     ].join('\n')
   );
 
-  const source = readFileSync(path.resolve(testDir, '../../../docker/tailscale-sidecar/entrypoint.sh'), 'utf8');
-  const scriptPath = path.join(root, 'entrypoint.sh');
+  const source = readFileSync(path.resolve(testDir, '../../../docker/runtime/dev-entrypoint.sh'), 'utf8');
+  const scriptPath = path.join(root, 'dev-entrypoint.sh');
   const rewritten = source
     .replaceAll('/var/lib/tailscale', stateDir)
     .replaceAll('/var/run/tailscale', runDir)
@@ -104,15 +64,17 @@ function prepareSidecarEntrypointHarness(): {
     root,
     scriptPath,
     logsDir,
+    stateDir,
     stateFile,
     env: {
       ...process.env,
-      PATH: `${binDir}:${process.env.PATH ?? ''}`
+      PATH: `${binDir}:${process.env.PATH ?? ''}`,
+      DEV_USER: 'dev'
     }
   };
 }
 
-describe('runtime entrypoints', () => {
+describe('runtime entrypoint', () => {
   const roots: string[] = [];
 
   afterEach(() => {
@@ -124,24 +86,8 @@ describe('runtime entrypoints', () => {
     }
   });
 
-  it('workspace entrypoint only launches sshd', () => {
-    const harness = prepareWorkspaceEntrypointHarness();
-    roots.push(harness.root);
-
-    const result = spawnSync('sh', [harness.scriptPath], {
-      env: harness.env,
-      encoding: 'utf8'
-    });
-
-    expect(result.status).toBe(0);
-    const sshdLog = readFileSync(path.join(harness.logsDir, 'sshd.log'), 'utf8');
-    expect(sshdLog).toContain('-D -e');
-    expect(result.stderr).not.toContain('DEVBOX_TAILSCALE_AUTHKEY');
-    expect(result.stderr).not.toContain('tailscale');
-  });
-
-  it('sidecar fails fast when neither auth key nor persisted state exists', () => {
-    const harness = prepareSidecarEntrypointHarness();
+  it('fails fast when neither auth key nor persisted state exists', () => {
+    const harness = prepareEntrypointHarness();
     roots.push(harness.root);
 
     const result = spawnSync('sh', [harness.scriptPath], {
@@ -153,8 +99,8 @@ describe('runtime entrypoints', () => {
     expect(result.stderr).toContain('DEVBOX_TAILSCALE_AUTHKEY or persisted state');
   });
 
-  it('sidecar starts tailscale with auth key and applies firewall rules', () => {
-    const harness = prepareSidecarEntrypointHarness();
+  it('starts tailscale with auth key when provided', () => {
+    const harness = prepareEntrypointHarness();
     roots.push(harness.root);
 
     const result = spawnSync('sh', [harness.scriptPath], {
@@ -168,17 +114,15 @@ describe('runtime entrypoints', () => {
 
     expect(result.status).toBe(0);
     const tailscaleLog = readFileSync(path.join(harness.logsDir, 'tailscale.log'), 'utf8');
-    const iptablesLog = readFileSync(path.join(harness.logsDir, 'iptables.log'), 'utf8');
     expect(tailscaleLog).toContain('--authkey=tskey-auth-test');
     expect(tailscaleLog).toContain('--hostname=devbox-auth');
     expect(tailscaleLog).toContain('--ssh');
-    expect(iptablesLog).toContain('-F INPUT');
-    expect(iptablesLog).toContain('-A INPUT -i tailscale0 -j ACCEPT');
-    expect(iptablesLog).toContain('-A INPUT -j DROP');
+    expect(result.stderr).not.toContain('sshd');
+    expect(result.stderr).not.toContain('iptables');
   });
 
-  it('sidecar resumes from persisted state without requiring an auth key', () => {
-    const harness = prepareSidecarEntrypointHarness();
+  it('resumes from persisted state without requiring an auth key', () => {
+    const harness = prepareEntrypointHarness();
     roots.push(harness.root);
     writeFileSync(harness.stateFile, '{"_profiles":{"default":{}}}');
 

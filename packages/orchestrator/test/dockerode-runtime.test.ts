@@ -36,7 +36,7 @@ describe('DockerodeRuntime', () => {
     const id = await runtime.createContainer({
       name: 'devbox-2',
       image: 'runtime:test',
-      networkMode: 'container:devbox-tailscale-box',
+      networkMode: 'devbox-net-box',
       mounts: [
         {
           Type: 'volume',
@@ -54,8 +54,8 @@ describe('DockerodeRuntime', () => {
           CgroupPermissions: 'rwm'
         }
       ],
-      capAdd: ['NET_ADMIN'],
-      capDrop: ['NET_RAW']
+      capAdd: ['NET_ADMIN', 'NET_RAW'],
+      capDrop: ['NET_BIND_SERVICE']
     });
 
     expect(id).toBe('container-123');
@@ -64,7 +64,7 @@ describe('DockerodeRuntime', () => {
         name: 'devbox-2',
         Image: 'runtime:test',
         HostConfig: expect.objectContaining({
-          NetworkMode: 'container:devbox-tailscale-box',
+          NetworkMode: 'devbox-net-box',
           Mounts: [
             {
               Type: 'volume',
@@ -79,8 +79,8 @@ describe('DockerodeRuntime', () => {
               CgroupPermissions: 'rwm'
             }
           ],
-          CapAdd: ['NET_ADMIN'],
-          CapDrop: ['NET_RAW']
+          CapAdd: ['NET_ADMIN', 'NET_RAW'],
+          CapDrop: ['NET_BIND_SERVICE']
         })
       })
     );
@@ -88,7 +88,7 @@ describe('DockerodeRuntime', () => {
 
   it('streams container runtime events with managed filters', async () => {
     const eventsStream = Readable.from([
-      '{"Type":"container","Action":"start","time":1700000000,"Actor":{"ID":"container-1","Attributes":{"com.devbox.managed":"true","com.devbox.box_id":"box-1","com.devbox.owner":"orchestrator","com.devbox.group":"devbox-box-1","com.devbox.role":"workspace","com.devbox.kind":"container"}}}\n'
+      '{"Type":"container","Action":"start","time":1700000000,"Actor":{"ID":"container-1","Attributes":{"com.devbox.managed":"true","com.devbox.box_id":"box-1","com.devbox.owner":"orchestrator","com.devbox.kind":"container"}}}\n'
     ]);
     const getEvents = vi.fn().mockResolvedValue(eventsStream);
     const runtime = new DockerodeRuntime({
@@ -108,8 +108,6 @@ describe('DockerodeRuntime', () => {
           'com.devbox.managed': 'true',
           'com.devbox.box_id': 'box-1',
           'com.devbox.owner': 'orchestrator',
-          'com.devbox.group': 'devbox-box-1',
-          'com.devbox.role': 'workspace',
           'com.devbox.kind': 'container'
         },
         timestamp: new Date(1_700_000_000_000).toISOString()
@@ -225,28 +223,40 @@ describe('DockerodeRuntime', () => {
     ]);
   });
 
-  it('aborts follow log streams by destroying the Docker stream', async () => {
-    const raw = new PassThrough();
-    const destroySpy = vi.spyOn(raw, 'destroy');
-    const logs = vi.fn().mockResolvedValue(raw);
+  it('demuxes follow streams into stdout and stderr lines', async () => {
+    const logStream = new PassThrough();
+    const logs = vi.fn().mockResolvedValue(logStream);
+    const demuxStream = vi.fn((_source, stdout: PassThrough, stderr: PassThrough) => {
+      stdout.write('2026-03-01T00:00:00.000000000Z hello stdout\n');
+      stderr.write('2026-03-01T00:00:01.000000000Z hello stderr\n');
+      stdout.end();
+      stderr.end();
+      logStream.destroy();
+    });
     const runtime = new DockerodeRuntime({
       getContainer: vi.fn().mockReturnValue({ logs }),
-      modem: { demuxStream: vi.fn() }
+      modem: { demuxStream }
     } as unknown as Dockerode);
-    const controller = new AbortController();
 
-    const consume = (async () => {
-      for await (const _event of runtime.streamContainerLogs('container-logs', {
-        follow: true,
-        signal: controller.signal
-      })) {
-        // no-op
+    const received = [];
+    for await (const event of runtime.streamContainerLogs('container-follow', {
+      follow: true
+    })) {
+      received.push(event);
+    }
+
+    expect(received).toEqual([
+      {
+        stream: 'stdout',
+        timestamp: '2026-03-01T00:00:00.000000000Z',
+        line: 'hello stdout'
+      },
+      {
+        stream: 'stderr',
+        timestamp: '2026-03-01T00:00:01.000000000Z',
+        line: 'hello stderr'
       }
-    })();
-
-    controller.abort();
-    await consume;
-
-    expect(destroySpy).toHaveBeenCalled();
+    ]);
+    expect(demuxStream).toHaveBeenCalled();
   });
 });

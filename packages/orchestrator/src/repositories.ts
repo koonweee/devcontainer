@@ -16,11 +16,9 @@ export interface BoxCreate {
   name: string;
   image: string;
   status: InternalBox['status'];
-  workspaceContainerId?: string | null;
-  tailscaleContainerId?: string | null;
+  containerId?: string | null;
   networkName: string;
-  workspaceVolumeName: string;
-  tailscaleStateVolumeName: string;
+  volumeName: string;
   tailnetUrl?: string | null;
   tailnetDeviceId?: string | null;
 }
@@ -68,11 +66,9 @@ function mapBox(row: Record<string, unknown>): InternalBox {
     name: String(row.name),
     image: String(row.image),
     status: row.status as InternalBox['status'],
-    workspaceContainerId: (row.workspace_container_id as string | null) ?? null,
-    tailscaleContainerId: (row.tailscale_container_id as string | null) ?? null,
+    containerId: (row.container_id as string | null) ?? null,
     networkName: String(row.network_name),
-    workspaceVolumeName: String(row.workspace_volume_name),
-    tailscaleStateVolumeName: String(row.tailscale_state_volume_name),
+    volumeName: String(row.volume_name),
     tailnetUrl: (row.tailnet_url as string | null) ?? null,
     tailnetDeviceId: (row.tailnet_device_id as string | null) ?? null,
     createdAt: String(row.created_at),
@@ -113,11 +109,9 @@ const BOXES_COLUMNS_SQL = `
   name TEXT NOT NULL,
   image TEXT NOT NULL,
   status TEXT NOT NULL,
-  workspace_container_id TEXT,
-  tailscale_container_id TEXT,
+  container_id TEXT,
   network_name TEXT NOT NULL,
-  workspace_volume_name TEXT NOT NULL,
-  tailscale_state_volume_name TEXT NOT NULL,
+  volume_name TEXT NOT NULL,
   tailnet_url TEXT,
   tailnet_device_id TEXT,
   created_at TEXT NOT NULL,
@@ -164,62 +158,9 @@ const CREATE_NAME_UNIQUE_INDEX_SQL = `
   ON boxes(name);
 `;
 
-function hasBoxesTable(db: DatabaseSync): boolean {
-  const row = db
-    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'boxes'")
-    .get() as { 1?: number } | undefined;
-  return row !== undefined;
-}
-
-function hasColumn(db: DatabaseSync, table: string, column: string): boolean {
-  const columns = db.prepare(`PRAGMA table_info('${table}')`).all() as Array<{ name?: unknown }>;
-  return columns.some((entry) => entry.name === column);
-}
-
-function isLegacyBoxesSchema(db: DatabaseSync): boolean {
-  if (!hasBoxesTable(db)) {
-    return false;
-  }
-
-  return (
-    hasColumn(db, 'boxes', 'container_id') ||
-    hasColumn(db, 'boxes', 'volume_name') ||
-    hasColumn(db, 'boxes', 'deleted_at')
-  );
-}
-
-function countRows(db: DatabaseSync, table: string): number {
-  const row = db.prepare(`SELECT COUNT(*) as count FROM ${table}`).get() as { count?: number } | undefined;
-  return Number(row?.count ?? 0);
-}
-
-function rebuildBoxesTable(db: DatabaseSync): void {
-  db.exec('BEGIN');
-  try {
-    db.exec('DROP TABLE IF EXISTS boxes');
-    db.exec(CREATE_BOXES_TABLE_SQL);
-    db.exec('COMMIT');
-  } catch (error) {
-    db.exec('ROLLBACK');
-    throw error;
-  }
-}
-
 export function initializeSchema(db: DatabaseSync): void {
+  db.exec(CREATE_BOXES_TABLE_SQL);
   db.exec(CREATE_JOBS_TABLE_SQL);
-
-  if (isLegacyBoxesSchema(db)) {
-    const legacyBoxCount = countRows(db, 'boxes');
-    if (legacyBoxCount > 0) {
-      throw new Error(
-        `Legacy box records detected (${legacyBoxCount}). Remove all existing boxes before upgrading to the sidecar runtime.`
-      );
-    }
-    rebuildBoxesTable(db);
-  } else {
-    db.exec(CREATE_BOXES_TABLE_SQL);
-  }
-
   db.exec(CREATE_NAME_UNIQUE_INDEX_SQL);
   db.exec(CREATE_TAILNET_CONFIG_TABLE_SQL);
 }
@@ -234,22 +175,8 @@ export class SqliteBoxRepository implements BoxRepository {
     this.db
       .prepare(
         `
-      INSERT INTO boxes (
-        id,
-        name,
-        image,
-        status,
-        workspace_container_id,
-        tailscale_container_id,
-        network_name,
-        workspace_volume_name,
-        tailscale_state_volume_name,
-        tailnet_url,
-        tailnet_device_id,
-        created_at,
-        updated_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO boxes (id, name, image, status, container_id, network_name, volume_name, tailnet_url, tailnet_device_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
       )
       .run(
@@ -257,11 +184,9 @@ export class SqliteBoxRepository implements BoxRepository {
         input.name,
         input.image,
         input.status,
-        input.workspaceContainerId ?? null,
-        input.tailscaleContainerId ?? null,
+        input.containerId ?? null,
         input.networkName,
-        input.workspaceVolumeName,
-        input.tailscaleStateVolumeName,
+        input.volumeName,
         input.tailnetUrl ?? null,
         input.tailnetDeviceId ?? null,
         timestamp,
@@ -283,7 +208,7 @@ export class SqliteBoxRepository implements BoxRepository {
       .prepare(
         `
       UPDATE boxes
-      SET name = ?, image = ?, status = ?, workspace_container_id = ?, tailscale_container_id = ?, network_name = ?, workspace_volume_name = ?, tailscale_state_volume_name = ?, tailnet_url = ?, tailnet_device_id = ?, updated_at = ?
+      SET name = ?, image = ?, status = ?, container_id = ?, network_name = ?, volume_name = ?, tailnet_url = ?, tailnet_device_id = ?, updated_at = ?
       WHERE id = ?
       `
       )
@@ -291,11 +216,9 @@ export class SqliteBoxRepository implements BoxRepository {
         updated.name,
         updated.image,
         updated.status,
-        updated.workspaceContainerId,
-        updated.tailscaleContainerId,
+        updated.containerId,
         updated.networkName,
-        updated.workspaceVolumeName,
-        updated.tailscaleStateVolumeName,
+        updated.volumeName,
         updated.tailnetUrl,
         updated.tailnetDeviceId,
         updated.updatedAt,
@@ -332,7 +255,8 @@ export class SqliteBoxRepository implements BoxRepository {
   }
 
   count(): number {
-    return countRows(this.db, 'boxes');
+    const row = this.db.prepare('SELECT COUNT(*) as cnt FROM boxes').get() as { cnt: number };
+    return Number(row.cnt);
   }
 
   private getRequired(boxId: string): InternalBox {
@@ -403,17 +327,9 @@ export class SqliteJobRepository implements JobRepository {
   }
 
   list(filter?: JobFilter): Job[] {
-    if (filter?.boxId) {
-      const rows = this.db
-        .prepare('SELECT * FROM jobs WHERE box_id = ? ORDER BY created_at DESC')
-        .all(filter.boxId) as Record<string, unknown>[];
-      return rows.map(mapJob);
-    }
-
-    const rows = this.db.prepare('SELECT * FROM jobs ORDER BY created_at DESC').all() as Record<
-      string,
-      unknown
-    >[];
+    const rows = filter?.boxId
+      ? (this.db.prepare('SELECT * FROM jobs WHERE box_id = ? ORDER BY created_at DESC').all(filter.boxId) as Record<string, unknown>[])
+      : (this.db.prepare('SELECT * FROM jobs ORDER BY created_at DESC').all() as Record<string, unknown>[]);
     return rows.map(mapJob);
   }
 
@@ -433,7 +349,7 @@ export class SqliteJobRepository implements JobRepository {
   }
 }
 
-/** Persists tailnet credentials in a single-row SQLite table. */
+/** Stores tailnet config in SQLite as a single mutable row. */
 export class SqliteTailnetConfigRepository implements TailnetConfigRepository {
   constructor(private readonly db: DatabaseSync) {}
 
@@ -445,39 +361,49 @@ export class SqliteTailnetConfigRepository implements TailnetConfigRepository {
   }
 
   set(input: TailnetConfigInput): TailnetConfig {
+    const current = this.get();
     const timestamp = nowIso();
-    const existing = this.get();
-    if (existing) {
-      this.db
-        .prepare(
-          `UPDATE tailnet_config SET tailnet = ?, oauth_client_id = ?, oauth_client_secret = ?, tags_csv = ?, hostname_prefix = ?, authkey_expiry_seconds = ?, updated_at = ? WHERE id = 1`
-        )
-        .run(
-          input.tailnet,
-          input.oauthClientId,
-          input.oauthClientSecret,
-          input.tagsCsv ?? 'tag:devcontainer',
-          input.hostnamePrefix ?? 'devbox',
-          input.authkeyExpirySeconds ?? 600,
-          timestamp
-        );
-    } else {
-      this.db
-        .prepare(
-          `INSERT INTO tailnet_config (id, tailnet, oauth_client_id, oauth_client_secret, tags_csv, hostname_prefix, authkey_expiry_seconds, created_at, updated_at) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .run(
-          input.tailnet,
-          input.oauthClientId,
-          input.oauthClientSecret,
-          input.tagsCsv ?? 'tag:devcontainer',
-          input.hostnamePrefix ?? 'devbox',
-          input.authkeyExpirySeconds ?? 600,
-          timestamp,
-          timestamp
-        );
+    this.db
+      .prepare(
+        `
+      INSERT INTO tailnet_config (
+        id,
+        tailnet,
+        oauth_client_id,
+        oauth_client_secret,
+        tags_csv,
+        hostname_prefix,
+        authkey_expiry_seconds,
+        created_at,
+        updated_at
+      )
+      VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        tailnet = excluded.tailnet,
+        oauth_client_id = excluded.oauth_client_id,
+        oauth_client_secret = excluded.oauth_client_secret,
+        tags_csv = excluded.tags_csv,
+        hostname_prefix = excluded.hostname_prefix,
+        authkey_expiry_seconds = excluded.authkey_expiry_seconds,
+        updated_at = excluded.updated_at
+      `
+      )
+      .run(
+        input.tailnet,
+        input.oauthClientId,
+        input.oauthClientSecret,
+        input.tagsCsv ?? current?.tagsCsv ?? 'tag:devcontainer',
+        input.hostnamePrefix ?? current?.hostnamePrefix ?? 'devbox',
+        input.authkeyExpirySeconds ?? current?.authkeyExpirySeconds ?? 600,
+        current?.createdAt ?? timestamp,
+        timestamp
+      );
+
+    const config = this.get();
+    if (!config) {
+      throw new Error('Tailnet config not found after upsert');
     }
-    return this.get()!;
+    return config;
   }
 
   delete(): void {
@@ -492,7 +418,6 @@ export function createSqliteRepositories(dbPath: string): {
   tailnetConfig: SqliteTailnetConfigRepository;
 } {
   const db = new DatabaseSync(dbPath);
-  db.exec('PRAGMA journal_mode = WAL');
   initializeSchema(db);
   return {
     db,

@@ -191,12 +191,11 @@ describe('API routes', () => {
     await waitForTerminalJob(app, created.job.id);
 
     const createdBox = harness.boxes.get(created.box.id);
-    if (!createdBox?.workspaceContainerId || !createdBox.tailscaleContainerId) {
-      throw new Error('Expected grouped container ids for reconciliation route test');
+    if (!createdBox?.containerId) {
+      throw new Error('Expected container id for reconciliation route test');
     }
 
-    harness.runtime.setContainerStatus(createdBox.workspaceContainerId, 'exited');
-    harness.runtime.setContainerStatus(createdBox.tailscaleContainerId, 'exited');
+    harness.runtime.setContainerStatus(createdBox.containerId, 'exited');
 
     const listRes = await app.inject({ method: 'GET', url: '/v1/boxes' });
     expect(listRes.statusCode).toBe(200);
@@ -302,8 +301,8 @@ describe('API routes', () => {
     await waitForTerminalJob(app, created.job.id);
 
     const box = harness.boxes.get(created.box.id);
-    if (!box?.workspaceContainerId || !box.tailscaleContainerId) {
-      throw new Error('Expected grouped container ids for runtime monitor SSE test');
+    if (!box?.containerId) {
+      throw new Error('Expected container id for runtime monitor SSE test');
     }
 
     const response = await fetch(`${address}/v1/events`);
@@ -313,17 +312,14 @@ describe('API routes', () => {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
 
-    harness.runtime.setContainerStatus(box.workspaceContainerId, 'exited');
-    harness.runtime.setContainerStatus(box.tailscaleContainerId, 'exited');
+    harness.runtime.setContainerStatus(box.containerId, 'exited');
     harness.runtime.emitContainerEvent({
-      containerId: box.workspaceContainerId,
+      containerId: box.containerId,
       action: 'die',
       labels: {
         'com.devbox.managed': 'true',
         'com.devbox.box_id': box.id,
         'com.devbox.owner': 'orchestrator',
-        'com.devbox.group': `devbox-${box.id}`,
-        'com.devbox.role': 'workspace',
         'com.devbox.kind': 'container'
       },
       timestamp: new Date().toISOString()
@@ -494,11 +490,11 @@ describe('API routes', () => {
     await waitForTerminalJob(app, created.job.id);
 
     const box = harness.boxes.get(created.box.id);
-    if (!box?.workspaceContainerId) {
-      throw new Error('Expected workspace container id for tail query test');
+    if (!box?.containerId) {
+      throw new Error('Expected container id for tail query test');
     }
 
-    harness.runtime.pushLog(box.workspaceContainerId, {
+    harness.runtime.pushLog(box.containerId, {
       stream: 'stdout',
       timestamp: new Date().toISOString(),
       line: 'tail line'
@@ -528,10 +524,10 @@ describe('API routes', () => {
     const created = createRes.json() as { box: { id: string }; job: { id: string } };
     await waitForTerminalJob(app, created.job.id);
     const box = harness.boxes.get(created.box.id);
-    if (!box?.workspaceContainerId) {
-      throw new Error('Expected workspace container id for abort test');
+    if (!box?.containerId) {
+      throw new Error('Expected container id for abort test');
     }
-    harness.runtime.pushLog(box.workspaceContainerId, {
+    harness.runtime.pushLog(box.containerId, {
       stream: 'stdout',
       timestamp: new Date().toISOString(),
       line: 'ready'
@@ -607,10 +603,10 @@ describe('API routes', () => {
     await waitForTerminalJob(app, created.job.id);
 
     const box = harness.boxes.get(created.box.id);
-    if (!box?.workspaceContainerId) {
-      throw new Error('Expected workspace container id for unmanaged logs test');
+    if (!box?.containerId) {
+      throw new Error('Expected container id for unmanaged logs test');
     }
-    const container = harness.runtime.containers.get(box.workspaceContainerId);
+    const container = harness.runtime.containers.get(box.containerId);
     if (!container) {
       throw new Error('Expected container record for unmanaged logs test');
     }

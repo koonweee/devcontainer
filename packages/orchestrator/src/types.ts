@@ -22,11 +22,9 @@ export interface Box {
 }
 
 export interface InternalBox extends Box {
-  workspaceContainerId: string | null;
-  tailscaleContainerId: string | null;
+  containerId: string | null;
   networkName: string;
-  workspaceVolumeName: string;
-  tailscaleStateVolumeName: string;
+  volumeName: string;
   tailnetDeviceId: string | null;
 }
 

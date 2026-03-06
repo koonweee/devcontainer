@@ -10,7 +10,7 @@ import { MockDockerRuntime } from './mock-runtime.js';
 import { InMemoryTailnetConfigRepository } from './in-memory-repositories.js';
 import { MockTailscaleClient } from './mock-tailscale-client.js';
 
-type Mode = 'reuse' | 'migration-empty' | 'migration-gate';
+type Mode = 'reuse' | 'schema';
 
 async function waitForJob(
   orchestrator: DevboxOrchestrator,
@@ -54,7 +54,6 @@ async function runReuseCheck(): Promise<void> {
     {},
     tailnetConfig,
     tailscaleClient,
-    undefined,
     [1, 1, 1]
   );
 
@@ -87,127 +86,27 @@ async function runReuseCheck(): Promise<void> {
   }
 }
 
-function writeLegacyBoxesTable(dbPath: string, withRow: boolean): void {
-  const repositories = createSqliteRepositories(dbPath);
-  const timestamp = new Date().toISOString();
-
-  repositories.db.exec('DROP INDEX IF EXISTS boxes_name_unique');
-  repositories.db.exec('DROP TABLE IF EXISTS boxes');
-  repositories.db.exec(`
-    CREATE TABLE boxes (
-      id TEXT PRIMARY KEY,
-      name TEXT UNIQUE NOT NULL,
-      image TEXT NOT NULL,
-      status TEXT NOT NULL,
-      container_id TEXT,
-      network_name TEXT NOT NULL,
-      volume_name TEXT NOT NULL,
-      tailnet_url TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      deleted_at TEXT
-    );
-  `);
-
-  if (withRow) {
-    repositories.db
-      .prepare(
-        `
-        INSERT INTO boxes (
-          id,
-          name,
-          image,
-          status,
-          container_id,
-          network_name,
-          volume_name,
-          tailnet_url,
-          created_at,
-          updated_at,
-          deleted_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `
-      )
-      .run(
-        'legacy-id',
-        'legacy-box',
-        'debian:trixie-slim',
-        'stopped',
-        null,
-        'legacy-net',
-        'legacy-vol',
-        null,
-        timestamp,
-        timestamp,
-        timestamp
-      );
-  }
-
-  repositories.db.close();
-}
-
-function runEmptyMigrationCheck(): void {
-  const tempDir = mkdtempSync(path.join(tmpdir(), 'devbox-migration-empty-'));
+function runSchemaCheck(): void {
+  const tempDir = mkdtempSync(path.join(tmpdir(), 'devbox-schema-'));
   const dbPath = path.join(tempDir, 'devbox.sqlite');
-  writeLegacyBoxesTable(dbPath, false);
-
   const repositories = createSqliteRepositories(dbPath);
+
   try {
     const tableSqlRow = repositories.db
       .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'boxes'")
       .get() as { sql?: string } | undefined;
     const tableSql = tableSqlRow?.sql ?? '';
-    if (tableSql.includes('deleted_at')) {
-      throw new Error('legacy deleted_at column still exists after reset');
+    if (!tableSql.includes('container_id TEXT')) {
+      throw new Error('expected single-container schema to include container_id');
     }
-
-    repositories.boxes.create({
-      name: 'legacy-box',
-      image: 'debian:trixie-slim',
-      status: 'creating',
-      networkName: 'legacy-net-2',
-      workspaceVolumeName: 'legacy-workspace-vol-2',
-      tailscaleStateVolumeName: 'legacy-tsstate-vol-2'
-    });
-
-    let duplicateAllowed = false;
-    try {
-      repositories.boxes.create({
-        name: 'legacy-box',
-        image: 'debian:trixie-slim',
-        status: 'creating',
-        networkName: 'legacy-net-3',
-        workspaceVolumeName: 'legacy-workspace-vol-3',
-        tailscaleStateVolumeName: 'legacy-tsstate-vol-3'
-      });
-      duplicateAllowed = true;
-    } catch {
-      // Expected.
+    if (!tableSql.includes('volume_name TEXT')) {
+      throw new Error('expected single-container schema to include volume_name');
     }
-    if (duplicateAllowed) {
-      throw new Error('global name uniqueness did not reject duplicate name');
+    if (tableSql.includes('workspace_container_id') || tableSql.includes('tailscale_container_id')) {
+      throw new Error('grouped runtime schema should not exist');
     }
   } finally {
     repositories.db.close();
-    rmSync(tempDir, { recursive: true, force: true });
-  }
-}
-
-function runMigrationGateCheck(): void {
-  const tempDir = mkdtempSync(path.join(tmpdir(), 'devbox-migration-gate-'));
-  const dbPath = path.join(tempDir, 'devbox.sqlite');
-  writeLegacyBoxesTable(dbPath, true);
-
-  try {
-    createSqliteRepositories(dbPath);
-    throw new Error('expected legacy box gate to fail startup');
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!message.includes('Legacy box records detected')) {
-      throw error;
-    }
-  } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }
 }
@@ -219,13 +118,8 @@ async function main(): Promise<void> {
     console.log('ok');
     return;
   }
-  if (mode === 'migration-empty') {
-    runEmptyMigrationCheck();
-    console.log('ok');
-    return;
-  }
-  if (mode === 'migration-gate') {
-    runMigrationGateCheck();
+  if (mode === 'schema') {
+    runSchemaCheck();
     console.log('ok');
     return;
   }

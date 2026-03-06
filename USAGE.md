@@ -3,9 +3,8 @@
 1. Install Node.js 22+ and Docker.
 2. Install dependencies: `npm install`.
 3. Review env defaults in `ENV.md`; set workspace-runtime env values in `docker/runtime/runtime.env` as needed.
-4. Build both local box images: `npm run build:runtime-image`.
+4. Build the local box image: `npm run build:runtime-image`.
    - This builds the workspace image from `docker/runtime/Dockerfile`.
-   - This also builds the Tailscale sidecar image from `docker/tailscale-sidecar/Dockerfile`.
 5. Generate contracts: `npm run gen:client`.
 6. Start API and web with hot reload:
    ```sh
@@ -15,26 +14,25 @@
 7. Open `http://localhost:5173`.
    - API changes trigger automatic restart via `tsx watch`.
    - Web changes apply instantly via Vite HMR.
-8. Configure Tailscale (required before creating boxes):
+8. Configure Tailscale before creating boxes:
    - Web: complete the setup form shown on first load.
    - CLI: `npm run -w @devbox/cli start -- setup tailnet --tailnet <tailnet> --client-id <id> --client-secret <secret>`
    - `tailnet` value: use your Tailnet ID from Tailscale Admin -> Settings -> General.
      - Typical values: `example.com` or `user@example.com`.
    - OAuth client scopes required by this platform:
-     - `auth_keys` write (mint per-box auth keys)
-     - `devices:core` write (device lookup + cleanup delete)
+     - `auth_keys` write
+     - `devices:core` write
    - Ensure your ACL `tagOwners` allows configured tags (default `tag:devcontainer`), for example:
      - `"tagOwners": { "tag:devcontainer": ["autogroup:admin", "tag:devcontainer"] }`
 9. Verify changes: `npm run typecheck && npm run test`.
 10. Match CI locally before opening a PR: `npm run lint && npm run test && npm run build && npm run check:client`.
 
 ## For deployment
-1. Build and publish both box images, then set `DEVBOX_RUNTIME_IMAGE` and `DEVBOX_TAILSCALE_SIDECAR_IMAGE` to those tags or digests.
+1. Build and publish the workspace image, then set `DEVBOX_RUNTIME_IMAGE` to that tag or digest.
 2. Configure deployment env values in `ENV.md` and set workspace-runtime envs in `docker/runtime/runtime.env`.
-3. Before rolling out the sidecar runtime, ensure there are zero existing box rows; this upgrade fails fast if legacy single-container box records still exist.
-4. Deploy `api` and `web` as separate containers/services, and mount persistent storage for SQLite at `DEVBOX_DB_PATH`.
-5. Ensure API container can access `/var/run/docker.sock`; do not grant that mount to web/CLI.
-6. Run post-deploy checks: API health, create/list/start/stop/remove flows, and logs/status streaming.
+3. Deploy `api` and `web` as separate containers/services, and mount persistent storage for SQLite at `DEVBOX_DB_PATH`.
+4. Ensure API container can access `/var/run/docker.sock`; do not grant that mount to web or CLI.
+5. Run post-deploy checks: API health, create/list/start/stop/remove flows, and logs/status streaming.
 
 # User flows
 
@@ -42,7 +40,7 @@
 - Configure once via web setup form or CLI `devbox setup tailnet`.
 - OAuth scopes required: `auth_keys` write and `devices:core` write.
 - ACL must allow configured tags in `tagOwners` (default tag: `tag:devcontainer`).
-- Tailnet SSH access is controlled only by Tailscale SSH policy (`ssh` rules), not by local box SSH auth configuration.
+- Tailscale SSH access is controlled by Tailscale SSH policy (`ssh` rules).
   - Docs: https://tailscale.com/kb/1193/tailscale-ssh
 - Config is locked while boxes exist (delete all boxes to reconfigure).
 - Check status: `devbox setup status` or `GET /v1/tailnet/config`.
@@ -61,7 +59,14 @@
    - Web: subscribes after hydration and applies `box.updated` and `box.removed` events directly; status and removals stream live without per-event full-list polling.
 4. Connect over Tailnet SSH:
    - Use the box hostname shown as `tailnetUrl`.
-   - The workspace shares the sidecar network namespace, so Tailnet access still targets the box hostname even though the privileged networking stack lives in the sidecar.
+   - Tailscale SSH terminates directly in the workspace container.
+   - Using Tailscale also makes it straightforward to reach development services started inside the box, such as local web apps, over the box's Tailnet hostname or IP when ACLs allow it.
+   - Networking guarantees for boxes:
+     - Boxes are isolated from each other at the Docker network layer.
+     - Boxes may still reach each other over Tailscale if ACLs allow it.
+     - Boxes do not publish Docker host ports.
+     - Services started inside a box may be reachable over that box’s Tailnet address.
+     - Because the workspace keeps full `sudo`, a user inside the box can still change box-local networking behavior such as starting extra listeners, adding port forwards or proxies, and altering routes or firewall rules inside that box.
 5. Stream box logs:
    - API SSE: `GET /v1/boxes/:boxId/logs?follow=true&tail=200&since=<iso-or-unix-seconds>`
    - CLI snapshot default: `npm run -w @devbox/cli start -- logs <boxId|name>`
@@ -77,5 +82,5 @@
    - CLI: `npm run -w @devbox/cli start -- start <boxId|name>`
 8. Remove a box:
    - API: `DELETE /v1/boxes/:boxId`
-   - Behavior: API remove cleans up both grouped containers, the per-box network, and the two per-box volumes.
+   - Behavior: API remove cleans up the workspace container, per-box network, and per-box volume.
    - CLI: `npm run -w @devbox/cli start -- rm <boxId|name>`

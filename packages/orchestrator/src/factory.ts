@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 
 import { createSqliteRepositories } from './repositories.js';
 import { OrchestratorEvents } from './events.js';
@@ -11,7 +11,6 @@ import { HttpTailscaleClient } from './tailscale-client.js';
 export interface OrchestratorFactoryOptions {
   dbPath?: string;
   runtimeImage?: string;
-  tailscaleSidecarImage?: string;
   runtimeEnv?: Record<string, string>;
   runtimeEnvFile?: string;
 }
@@ -30,6 +29,9 @@ function parseRuntimeEnvFile(runtimeEnvFile: string): Record<string, string> {
   const runtimeEnv: Record<string, string> = {};
 
   if (!existsSync(runtimeEnvFile)) {
+    return runtimeEnv;
+  }
+  if (!statSync(runtimeEnvFile).isFile()) {
     return runtimeEnv;
   }
 
@@ -70,10 +72,6 @@ export function createOrchestrator(options?: OrchestratorFactoryOptions): Devbox
     options?.runtimeImage ??
     process.env.DEVBOX_RUNTIME_IMAGE ??
     'devbox-runtime:local';
-  const tailscaleSidecarImage =
-    options?.tailscaleSidecarImage ??
-    process.env.DEVBOX_TAILSCALE_SIDECAR_IMAGE ??
-    'devbox-tailscale-sidecar:local';
   const runtimeEnvFile =
     options?.runtimeEnvFile ??
     process.env.DEVBOX_RUNTIME_ENV_FILE ??
@@ -95,7 +93,6 @@ export function createOrchestrator(options?: OrchestratorFactoryOptions): Devbox
     runtimeImage,
     runtimeEnv,
     repositories.tailnetConfig,
-    tailscaleClient,
-    tailscaleSidecarImage
+    tailscaleClient
   );
 }
