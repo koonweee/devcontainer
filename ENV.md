@@ -53,11 +53,11 @@ These are orchestrator-managed env vars injected into each created workspace con
 
 - `DEVBOX_TAILSCALE_AUTHKEY` - Per-box Tailscale auth key minted at create time and not persisted in orchestrator state.
 - `DEVBOX_TAILSCALE_HOSTNAME` - Tailscale hostname for the box (for example `devbox-mybox-a1b2c3d4`).
-- `DEVBOX_TAILSCALE_STATE_DIR` - Optional Tailscale state directory override used by the runtime entrypoint (default: `/var/lib/tailscale`).
 
 ## Notes
 - API bind and port are fixed by the service (`0.0.0.0:3000`) and are not configured through env vars.
 - Keep workspace runtime env entries in `docker/runtime/runtime.env`.
+- Workspace containers persist Tailscale state at `/workspace/.tailscale`.
 - Runtime boxes support Tailscale SSH. Local OpenSSH is not part of the supported runtime contract.
 - Tailnet credentials (OAuth client ID and secret) are stored in the SQLite database, not in env vars. Configure them via the web UI setup form or `devbox setup tailnet` CLI command.
 - Tailscale OAuth client must include `auth_keys` write and `devices:core` write scopes.

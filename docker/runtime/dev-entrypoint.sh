@@ -2,7 +2,7 @@
 set -eu
 
 DEV_USER="${DEV_USER:-dev}"
-TAILSCALE_STATE_DIR="${DEVBOX_TAILSCALE_STATE_DIR:-/var/lib/tailscale}"
+TAILSCALE_STATE_DIR="/workspace/.tailscale"
 TAILSCALE_STATE_FILE="${TAILSCALE_STATE_DIR}/tailscaled.state"
 TAILSCALE_SOCKET="/var/run/tailscale/tailscaled.sock"
 
