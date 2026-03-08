@@ -24,10 +24,12 @@ function prepareEntrypointHarness(): {
   const binDir = path.join(root, 'bin');
   const logsDir = path.join(root, 'logs');
   const runDir = path.join(root, 'run');
-  const stateDir = path.join(root, 'var-lib-tailscale');
+  const workspaceDir = path.join(root, 'workspace');
+  const stateDir = path.join(workspaceDir, '.tailscale');
   const stateFile = path.join(stateDir, 'tailscaled.state');
   mkdirSync(binDir, { recursive: true });
   mkdirSync(logsDir, { recursive: true });
+  mkdirSync(workspaceDir, { recursive: true });
   mkdirSync(stateDir, { recursive: true });
 
   makeExecutable(path.join(binDir, 'id'), '#!/bin/sh\nexit 0\n');
@@ -52,7 +54,7 @@ function prepareEntrypointHarness(): {
   const source = readFileSync(path.resolve(testDir, '../../../docker/runtime/dev-entrypoint.sh'), 'utf8');
   const scriptPath = path.join(root, 'dev-entrypoint.sh');
   const rewritten = source
-    .replaceAll('/var/lib/tailscale', stateDir)
+    .replaceAll('/workspace/.tailscale', stateDir)
     .replaceAll('/var/run/tailscale', runDir)
     .replace(
       'wait "$TAILSCALED_PID"',
