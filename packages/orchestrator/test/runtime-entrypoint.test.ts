@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -12,7 +12,11 @@ function makeExecutable(filePath: string, contents: string): void {
   writeFileSync(filePath, contents, { mode: 0o755 });
 }
 
-function prepareEntrypointHarness(): {
+interface EntrypointHarnessOptions {
+  omitStateTargetDir?: boolean;
+}
+
+function prepareEntrypointHarness(options: EntrypointHarnessOptions = {}): {
   root: string;
   scriptPath: string;
   logsDir: string;
@@ -25,12 +29,16 @@ function prepareEntrypointHarness(): {
   const logsDir = path.join(root, 'logs');
   const runDir = path.join(root, 'run');
   const workspaceDir = path.join(root, 'workspace');
-  const stateDir = path.join(workspaceDir, '.tailscale');
+  const stateDir = path.join(root, 'var-lib-tailscale');
+  const stateTargetDir = path.join(workspaceDir, '.tailscale');
   const stateFile = path.join(stateDir, 'tailscaled.state');
   mkdirSync(binDir, { recursive: true });
   mkdirSync(logsDir, { recursive: true });
   mkdirSync(workspaceDir, { recursive: true });
-  mkdirSync(stateDir, { recursive: true });
+  if (!options.omitStateTargetDir) {
+    mkdirSync(stateTargetDir, { recursive: true });
+  }
+  symlinkSync(stateTargetDir, stateDir);
 
   makeExecutable(path.join(binDir, 'id'), '#!/bin/sh\nexit 0\n');
   makeExecutable(
@@ -54,7 +62,8 @@ function prepareEntrypointHarness(): {
   const source = readFileSync(path.resolve(testDir, '../../../docker/runtime/dev-entrypoint.sh'), 'utf8');
   const scriptPath = path.join(root, 'dev-entrypoint.sh');
   const rewritten = source
-    .replaceAll('/workspace/.tailscale', stateDir)
+    .replaceAll('/workspace/.tailscale', stateTargetDir)
+    .replaceAll('/var/lib/tailscale', stateDir)
     .replaceAll('/var/run/tailscale', runDir)
     .replace(
       'wait "$TAILSCALED_PID"',
@@ -140,6 +149,25 @@ describe('runtime entrypoint', () => {
     const tailscaleLog = readFileSync(path.join(harness.logsDir, 'tailscale.log'), 'utf8');
     expect(tailscaleLog).not.toContain('--authkey=');
     expect(tailscaleLog).toContain('--hostname=devbox-stateful');
+    expect(tailscaleLog).toContain('--ssh');
+  });
+
+  it('creates the workspace-backed state target when /var/lib/tailscale is a symlink', () => {
+    const harness = prepareEntrypointHarness({ omitStateTargetDir: true });
+    roots.push(harness.root);
+
+    const result = spawnSync('sh', [harness.scriptPath], {
+      env: {
+        ...harness.env,
+        DEVBOX_TAILSCALE_AUTHKEY: 'tskey-auth-test',
+        DEVBOX_TAILSCALE_HOSTNAME: 'devbox-symlink'
+      },
+      encoding: 'utf8'
+    });
+
+    expect(result.status).toBe(0);
+    const tailscaleLog = readFileSync(path.join(harness.logsDir, 'tailscale.log'), 'utf8');
+    expect(tailscaleLog).toContain('--hostname=devbox-symlink');
     expect(tailscaleLog).toContain('--ssh');
   });
 });

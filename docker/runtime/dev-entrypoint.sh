@@ -2,7 +2,7 @@
 set -eu
 
 DEV_USER="${DEV_USER:-dev}"
-TAILSCALE_STATE_DIR="/workspace/.tailscale"
+TAILSCALE_STATE_DIR="/var/lib/tailscale"
 TAILSCALE_STATE_FILE="${TAILSCALE_STATE_DIR}/tailscaled.state"
 TAILSCALE_SOCKET="/var/run/tailscale/tailscaled.sock"
 
@@ -11,7 +11,9 @@ if ! id "${DEV_USER}" >/dev/null 2>&1; then
   exit 1
 fi
 
-mkdir -p "${TAILSCALE_STATE_DIR}" /var/run/tailscale
+# Tailscale SSH still expects /var/lib/tailscale as its var-root, but that path is a symlink
+# into the persistent workspace volume. Create the real target directly to avoid mkdir-on-symlink failures.
+mkdir -p /workspace/.tailscale /var/run/tailscale
 
 if [ -z "${DEVBOX_TAILSCALE_AUTHKEY:-}" ] && [ ! -s "${TAILSCALE_STATE_FILE}" ]; then
   echo "error: Tailscale auth requires DEVBOX_TAILSCALE_AUTHKEY or persisted state at ${TAILSCALE_STATE_FILE}" >&2
