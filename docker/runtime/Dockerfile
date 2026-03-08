@@ -52,6 +52,4 @@ RUN chmod +x /usr/local/bin/dev-entrypoint.sh
 
 WORKDIR /workspace
 
-EXPOSE 3000
-
 ENTRYPOINT ["/usr/local/bin/dev-entrypoint.sh"]
