@@ -39,6 +39,7 @@ describe('DockerodeRuntime', () => {
       networkName: 'devbox-net-box',
       volumeName: 'workspace-vol',
       labels: { one: '1' },
+      dnsServers: ['1.1.1.1', '1.0.0.1'],
       command: ['sleep', 'infinity'],
       env: { HELLO: 'world' }
     });
@@ -59,6 +60,7 @@ describe('DockerodeRuntime', () => {
             ReadOnly: false
           }
         ],
+        Dns: ['1.1.1.1', '1.0.0.1'],
         NetworkMode: 'devbox-net-box',
         Devices: [
           {

@@ -105,6 +105,7 @@ describe('DevboxOrchestrator', () => {
     expect(container.options.image).toBe('runtime:test');
     expect(container.options.networkName).toBe(saved!.networkName);
     expect(container.options.volumeName).toBe(saved!.volumeName);
+    expect(container.options.dnsServers).toEqual(['1.1.1.1', '1.0.0.1']);
     expect(container.options.command).toEqual(['sleep', 'infinity']);
     expect(container.options.env).toMatchObject({
       EXTRA: 'value',
@@ -142,6 +143,7 @@ describe('DevboxOrchestrator', () => {
     const { box, job } = await orchestrator.createBox({ name: 'runtime-image-box' });
     expect(await waitForJob(orchestrator, job.id)).toBe('succeeded');
     expect(box.image).toBe('runtime:test');
+    expect(runtime.lastCreateBoxContainerOptions?.dnsServers).toEqual(['1.1.1.1', '1.0.0.1']);
     expect(runtime.lastCreateBoxContainerOptions?.env).toEqual({
       DEVBOX_TAILSCALE_AUTHKEY: 'tskey-auth-mock',
       DEVBOX_TAILSCALE_HOSTNAME: expect.stringContaining('devbox-runtime-image-box-')

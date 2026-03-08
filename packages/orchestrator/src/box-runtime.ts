@@ -12,6 +12,10 @@ export const BOX_TUN_DEVICE: ContainerDevice = {
   CgroupPermissions: 'rwm'
 };
 export const BOX_CAP_ADD = ['NET_ADMIN', 'NET_RAW'] as const;
+// When the Docker host also uses Tailscale DNS, Docker's default 127.0.0.11 resolver can recurse
+// back into Tailscale. Give boxes fixed public upstreams so tailscaled can serve MagicDNS and
+// forward the rest without depending on the host's DNS context.
+export const BOX_DNS_SERVERS = ['1.1.1.1', '1.0.0.1'] as const;
 
 export interface BoxContainerCreateRequest {
   name: string;
@@ -26,6 +30,7 @@ export interface BoxContainerCreateRequest {
       Target: typeof BOX_WORKSPACE_MOUNT_TARGET;
       ReadOnly: false;
     }>;
+    Dns?: string[];
     NetworkMode: string;
     Devices: ContainerDevice[];
     CapAdd: string[];
@@ -51,6 +56,7 @@ export function buildBoxContainerCreateRequest(
           ReadOnly: false
         }
       ],
+      Dns: options.dnsServers ? [...options.dnsServers] : undefined,
       NetworkMode: options.networkName,
       Devices: [BOX_TUN_DEVICE],
       CapAdd: [...BOX_CAP_ADD],

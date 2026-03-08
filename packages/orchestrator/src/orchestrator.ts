@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { validateBoxContainerIsolation } from './box-runtime.js';
+import { BOX_DNS_SERVERS, validateBoxContainerIsolation } from './box-runtime.js';
 import { ConfigLockedError, NotFoundError, SecurityError, SetupRequiredError, ValidationError } from './errors.js';
 import type { OrchestratorEvents } from './events.js';
 import { JobRunner, publishJob } from './job-runner.js';
@@ -222,6 +222,7 @@ export class DevboxOrchestrator {
           networkName: box.networkName,
           volumeName: box.volumeName,
           labels: this.labels(box.id, 'container'),
+          dnsServers: [...BOX_DNS_SERVERS],
           env: {
             ...(input.env ?? {}),
             DEVBOX_TAILSCALE_AUTHKEY: authKey.key,

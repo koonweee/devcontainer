@@ -64,6 +64,7 @@ export interface CreateBoxContainerOptions {
   networkName: string;
   volumeName: string;
   labels: Record<string, string>;
+  dnsServers?: string[];
   env?: Record<string, string>;
   command?: string[];
 }
